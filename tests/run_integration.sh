@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 make >/tmp/cc_build.log 2>&1 || { echo "BUILD FAILED"; cat /tmp/cc_build.log; exit 1; }
 
 PORT=8080
+pkill -9 -f 'bin/httpd' 2>/dev/null; sleep 0.3   # avoid port collision with a stale server
 ./bin/httpd >/tmp/cc_httpd.log 2>&1 &
 SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT
@@ -42,7 +43,7 @@ chk "$code" "404" "path traversal blocked (404)"
 # AC-5: concurrency — 50 parallel requests all 200
 rm -f /tmp/cc_conc.out
 for i in $(seq 1 50); do
-  ( c=$(curl -s -o /dev/null -w '%{http_code}' localhost:$PORT/); [ "$c" = "200" ] && echo y >> /tmp/cc_conc.out ) &
+  ( c=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' localhost:$PORT/); [ "$c" = "200" ] && echo y >> /tmp/cc_conc.out ) &
 done
 wait
 ok=$(wc -l < /tmp/cc_conc.out 2>/dev/null | tr -d ' ')
