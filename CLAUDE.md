@@ -105,18 +105,31 @@ rewrite to `T *_Owned`. The pattern is ALWAYS `T *_Owned`.
 
 ## BSC Project Compile Command
 
-**[FILL IN: how to compile and verify BSC files in THIS project]**
-
-Replace this block with your project's specifics. Examples:
-
 ```
-Compiler: /path/to/bsc/bin/clang   (NOT system clang — BSC needs a custom build)
-Includes: -I/path/to/libcbs/src -I./include
-Verify:   make check-file FILE=<file>
-    # or: /path/to/bsc/bin/clang -I<includes> -x bsc <file> -fsyntax-only
+Compiler: /home/zly/bsc/llvm-project/build/bin/clang   (NOT system clang)
+Includes: -I/home/zly/bsc/llvm-project/install/include/libcbs
+Link:     -L/home/zly/bsc/llvm-project/install/lib -lstdcbs -lpthread
+Flags:    -Wall -Wextra -Wno-nullability-completeness -g
 ```
 
-If this section still says `[FILL IN: ...]`, **ASK the user** for the project's compile command before writing or editing any BSC code. The generic `clang <file> -fsyntax-only` below will fail for most projects (wrong compiler, missing include flags).
+Build model: **single translation unit** — `src/main.cbs` `#include`s all other `.cbs`
+(business `src/*.cbs`, then adapters `src/platform/*.cbs`). libcbs `String`/`Vec` need
+`-lstdcbs` linked (they are NOT header-only). `String` is NOT NUL-terminated.
+
+Commands:
+```
+make                    # build bin/httpd (runs check-layers first)
+make smoke              # toolchain smoke test
+make test-<name>        # build+run tests/test_<name>.cbs (e.g. make test-router)
+bash tests/valgrind_units.sh    # run all unit tests under valgrind (BSC tests can pass while UAF!)
+bash tests/run_integration.sh   # curl-based AC-2..AC-5 + traversal
+bash tests/check_no_unsafe.sh   # enforce: business src/*.cbs is _Unsafe-free
+# syntax-only one file: <compiler> <flags> <includes> -fsyntax-only <file>
+```
+
+**Layering rule (mandatory):** business `src/*.cbs` must be `_Unsafe`-free; all `_Unsafe`
+lives in adapters `src/platform/*.cbs` (each a `_Safe` interface with `_Unsafe` blocks
+inside). Enforced by `make` via `check-layers`.
 
 ## Code Verification
 
