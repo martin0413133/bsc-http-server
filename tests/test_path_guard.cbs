@@ -7,11 +7,17 @@
 static int fails = 0;
 #define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
 
+static _Safe String mkstr(const char* _Nonnull c) {
+    String s = String::new();
+    str_append_cstr(&_Mut s, c);
+    return s;
+}
+
 int main(void) {
-    CHECK(path_is_safe("/index.html"), "normal ok");
-    CHECK(path_is_safe("/css/style.css"), "subdir ok");
-    CHECK(!path_is_safe("/../etc/passwd"), "dotdot rejected");
-    CHECK(!path_is_safe("/a/../../b"), "embedded dotdot rejected");
+    String p1 = mkstr("/index.html");    CHECK(path_is_safe(&_Const p1), "normal ok");
+    String p2 = mkstr("/css/style.css"); CHECK(path_is_safe(&_Const p2), "subdir ok");
+    String p3 = mkstr("/../etc/passwd"); CHECK(!path_is_safe(&_Const p3), "dotdot rejected");
+    String p4 = mkstr("/a/../../b");     CHECK(!path_is_safe(&_Const p4), "embedded dotdot rejected");
     if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
     _Unsafe{printf("test_path_guard OK\n");}
     return 0;

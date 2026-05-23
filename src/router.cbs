@@ -26,9 +26,10 @@ _Safe Handler _Nullable Router::match(const Router* _Borrow this, const Request*
     return nullptr;
 }
 
-_Safe _Bool path_is_safe(const char* _Nonnull path) {
-    for (size_t i = 0; path[i] != '\0'; i++) {
-        if (path[i] == '.' && path[i + 1] == '.') { return 0; }
+_Safe _Bool path_is_safe(const String* _Borrow path) {
+    size_t n = path->length();
+    for (size_t i = 0; i + 1 < n; i++) {
+        if (path->at(i) == '.' && path->at(i + 1) == '.') { return 0; }
     }
     return 1;
 }

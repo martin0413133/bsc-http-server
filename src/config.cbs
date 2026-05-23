@@ -19,30 +19,36 @@ _Safe int parse_int(const String* _Borrow s) {
     return v;
 }
 
-_Safe Config Config::parse(const char* _Nonnull text) {
+// Char at index, or '\0' past the end. Lets the NUL-sentinel scanner below run
+// unchanged on a (non-NUL-terminated) String borrow.
+static _Safe char at_or_nul(const String* _Borrow s, size_t i) {
+    return i < s->length() ? s->at(i) : '\0';
+}
+
+_Safe Config Config::parse(const String* _Borrow text) {
     int port = 8080;
     int threads = 4;
     String dr = String::new();
     str_append_cstr(&_Mut dr, "www");
 
     size_t i = 0;
-    while (text[i] != '\0') {
-        while (text[i] == ' ' || text[i] == '\t') { i++; }
-        if (text[i] == '#' || text[i] == '\n' || text[i] == '\r') {
-            while (text[i] != '\0' && text[i] != '\n') { i++; }
-            if (text[i] == '\n') { i++; }
+    while (at_or_nul(text, i) != '\0') {
+        while (at_or_nul(text, i) == ' ' || at_or_nul(text, i) == '\t') { i++; }
+        if (at_or_nul(text, i) == '#' || at_or_nul(text, i) == '\n' || at_or_nul(text, i) == '\r') {
+            while (at_or_nul(text, i) != '\0' && at_or_nul(text, i) != '\n') { i++; }
+            if (at_or_nul(text, i) == '\n') { i++; }
             continue;
         }
-        if (text[i] == '\0') { break; }
+        if (at_or_nul(text, i) == '\0') { break; }
         String key = String::new();
         String val = String::new();
-        while (text[i] != '\0' && text[i] != '=' && text[i] != '\n' && text[i] != ' ' && text[i] != '\t') { key.push(text[i]); i++; }
-        while (text[i] == ' ' || text[i] == '\t') { i++; }
-        if (text[i] == '=') { i++; }
-        while (text[i] == ' ' || text[i] == '\t') { i++; }
-        while (text[i] != '\0' && text[i] != '\n' && text[i] != '\r' && text[i] != ' ') { val.push(text[i]); i++; }
-        while (text[i] != '\0' && text[i] != '\n') { i++; }
-        if (text[i] == '\n') { i++; }
+        while (at_or_nul(text, i) != '\0' && at_or_nul(text, i) != '=' && at_or_nul(text, i) != '\n' && at_or_nul(text, i) != ' ' && at_or_nul(text, i) != '\t') { key.push(at_or_nul(text, i)); i++; }
+        while (at_or_nul(text, i) == ' ' || at_or_nul(text, i) == '\t') { i++; }
+        if (at_or_nul(text, i) == '=') { i++; }
+        while (at_or_nul(text, i) == ' ' || at_or_nul(text, i) == '\t') { i++; }
+        while (at_or_nul(text, i) != '\0' && at_or_nul(text, i) != '\n' && at_or_nul(text, i) != '\r' && at_or_nul(text, i) != ' ') { val.push(at_or_nul(text, i)); i++; }
+        while (at_or_nul(text, i) != '\0' && at_or_nul(text, i) != '\n') { i++; }
+        if (at_or_nul(text, i) == '\n') { i++; }
 
         if (str_eq_cstr(&_Const key, "port")) { port = parse_int(&_Const val); }
         else if (str_eq_cstr(&_Const key, "threads")) { threads = parse_int(&_Const val); }

@@ -17,5 +17,5 @@ _Safe void Router::add(Router* _Borrow this, const char* _Nonnull method, const 
 _Safe Handler _Nullable Router::match(const Router* _Borrow this, const Request* _Borrow req);
 
 // Reject paths containing a ".." segment (traversal). True = safe.
-_Safe _Bool path_is_safe(const char* _Nonnull path);
+_Safe _Bool path_is_safe(const String* _Borrow path);
 #endif

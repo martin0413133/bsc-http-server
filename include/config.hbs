@@ -10,5 +10,5 @@ _Public:
 };
 
 _Safe Config Config::default_config(void);
-_Safe Config Config::parse(const char* _Nonnull text);   // parse from buffer (business; no file IO)
+_Safe Config Config::parse(const String* _Borrow text);   // parse from a String (business; no file IO)
 #endif

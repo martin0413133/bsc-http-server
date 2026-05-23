@@ -13,7 +13,9 @@ static int fails = 0;
 #define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
 
 int main(void) {
-    Config cfg = Config::parse("document_root = www\n");
+    String cfgtext = String::new();
+    str_append_cstr(&_Mut cfgtext, "document_root = www\n");
+    Config cfg = Config::parse(&_Const cfgtext);
 
     Request r = Request::parse("GET / HTTP/1.1\r\n\r\n");
     Response resp = serve_static(&_Const cfg, &_Const r);

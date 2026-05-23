@@ -6,8 +6,9 @@ static int fails = 0;
 #define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
 
 int main(void) {
-    const char* text = "# comment\nport = 9090\ndocument_root = public\nthreads=8\n";
-    Config c = Config::parse(text);
+    String text = String::new();
+    str_append_cstr(&_Mut text, "# comment\nport = 9090\ndocument_root = public\nthreads=8\n");
+    Config c = Config::parse(&_Const text);
     CHECK(c.port == 9090, "port");
     CHECK(c.threads == 8, "threads");
     CHECK(str_eq_cstr(&_Const c.document_root, "public"), "doc root");

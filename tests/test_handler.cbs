@@ -16,7 +16,9 @@ static int fails = 0;
 _Safe Response hello(const Request* _Borrow req) { return Response::ok_text("ROUTED", "text/plain"); }
 
 int main(void) {
-    Config cfg = Config::parse("document_root = www\n");
+    String cfgtext = String::new();
+    str_append_cstr(&_Mut cfgtext, "document_root = www\n");
+    Config cfg = Config::parse(&_Const cfgtext);
     Router rt = Router::new();
     rt.add("GET", "/hello", hello);
 

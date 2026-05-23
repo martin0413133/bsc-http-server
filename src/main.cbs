@@ -27,9 +27,7 @@ _Safe int main(void) {
     // Load config text via the fs adapter, then parse (business).
     String text = String::new();
     fs_read_file("config.ini", &_Mut text);
-    char cbuf[4096] = {0};
-    str_to_cbuf(&_Const text, cbuf, 4096);
-    Config config = Config::parse(cbuf);
+    Config config = Config::parse(&_Const text);
 
     Router router = Router::new();
     router.add("GET", "/hello", route_hello);
