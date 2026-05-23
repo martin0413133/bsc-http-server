@@ -364,6 +364,45 @@ BSC is single-owner by default. If two places need to own the same value, use
 `Rc<T>` (reference-counted) from stdlib-advanced. Don't invent your own sharing scheme —
 you'll break the ownership invariants.
 
+### Sharing long-lived read-only state with worker threads
+
+`Rc<T>` is single-threaded. For immutable data that must be readable from worker threads
+for the lifetime of the process (config, router, lookup tables), the correct pattern is:
+
+1. Heap-allocate with `safe_malloc` to get a stable address.
+2. Call `__move_to_raw` inside an `_Unsafe` block to transfer ownership to a raw pointer.
+   No destructor will run on it — this is an intentional process-lifetime allocation.
+   Document it.
+3. Store the raw pointer as `const T* _Nonnull` in a plain (non-`_Owned`) shared context
+   struct passed to each thread.
+4. Cross the thread boundary only with plain copy types (`int` fds, indices). Never pass
+   `_Borrow` or `_Owned` pointers across threads. `_Borrow → raw` is **forbidden in both
+   `_Safe` and `_Unsafe`** — there is no cast from a `_Borrow` pointer to a raw pointer,
+   anywhere.
+
+```c
+// In _Unsafe block inside the thread-pool setup function:
+Config *_Owned cfgp = safe_malloc(config);   // stable heap address; takes ownership
+Router *_Owned rtp  = safe_malloc(router);
+
+// Intentional process-lifetime allocation — no paired free.
+static struct ServerCtx ctx;
+ctx.config = (const Config* _Nonnull)__move_to_raw(cfgp);
+ctx.router = (const Router* _Nonnull)__move_to_raw(rtp);
+
+// Worker threads reconstruct a _Borrow from the raw pointer:
+_Safe void worker(int fd, void* _Nonnull ctx_raw) {
+    struct ServerCtx* ctx = _Unsafe((struct ServerCtx*)ctx_raw);
+    const Config* _Borrow cfg = _Unsafe(&_Const *(ctx->config));
+    ...
+}
+```
+
+The explicit `(const T* _Nonnull)` cast is required when assigning into a `_Nonnull`-typed
+field, because `__move_to_raw` returns a nullable raw pointer and the field's declared type
+enforces nonnull. The `ServerCtx` struct itself must be `static` (or heap-allocated) so its
+address remains valid after the setup function returns.
+
 ---
 
 ## 5. Designing the `_Safe` / `_Unsafe` boundary

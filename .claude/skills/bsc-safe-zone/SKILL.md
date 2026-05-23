@@ -124,6 +124,58 @@ _Safe {
 }
 ```
 
+#### `_Owned struct` must use aggregate designated init — never a bare declarator
+
+An `_Owned struct` always contains `_Owned` fields (directly or through `String`/`Vec`
+members). A bare declarator is always rejected in a safe zone:
+
+```c
+// ERROR — "uninitialized declarator is forbidden in the safe zone"
+Request r;
+
+// CORRECT — all fields provided via aggregate designated init
+Request r = {
+    .method  = String::new(),
+    .path    = String::new(),
+    .headers = Vec<Header>::new(),
+    .body    = String::new(),
+    .ok      = 0
+};
+```
+
+All `_Owned` sub-fields must be move-initialized inside the brace list. You cannot
+construct the struct first and assign fields afterward — see the rule immediately below.
+
+#### Cannot reassign an `_Owned` struct field after construction; use `safe_swap` instead
+
+After an `_Owned struct` is initialized, assigning to an `_Owned` field is rejected:
+
+```c
+Config c = { .name = String::new(), ... };
+String newname = build_name();
+c.name = newname;   // ERROR — "assign to part of _Owned value"
+```
+
+Two legal alternatives:
+
+**A — move at construction** (preferred when the value is known before the struct is built):
+
+```c
+String name = build_name();
+Config c = { .name = name, ... };  // `name` is moved in; `name` is dead afterward
+```
+
+**B — `safe_swap` for post-construction replacement** (from `bishengc_safety.hbs`):
+
+```c
+String newname = build_name();
+safe_swap(&_Mut c.name, &_Mut newname);
+// swaps in place; old value lands in `newname` and destructs at scope end
+```
+
+`safe_swap<T>(T* _Borrow left, T* _Borrow right)` exchanges two owned values without a
+direct assignment statement, which the safe-zone rules permit.
+
 ### Increment/decrement (`++`/`--`)
 `++` and `--` are **allowed**, but their result type is `void`. You can use them as standalone statements, but you cannot use the expression's value.
 

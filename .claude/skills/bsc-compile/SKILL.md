@@ -68,6 +68,24 @@ BSC has two include directories that may need `-I` flags:
 /path/to/bsc/bin/clang -I/path/to/libcbs/src -I/path/to/bsc_include file.cbs -o output
 ```
 
+### Linking libcbs (`String`, `Vec`, etc. are NOT header-only)
+
+`String`, `Vec`, `LinkedList`, `Option`, `Result`, and all other libcbs types have
+compiled implementations in `libstdcbs.a`. Including their `.hbs` headers without linking
+the library produces "undefined reference to `struct_String_new`" (and similar) at link
+time. Always add `-L<install>/lib -lstdcbs` when using any libcbs type:
+
+```bash
+/path/to/bsc/bin/clang file.cbs \
+    -I/path/to/install/include/libcbs \
+    -L/path/to/install/lib -lstdcbs \
+    -o output
+```
+
+If the program also uses pthreads (e.g. a thread pool), add `-lpthread` as well. The
+`bishengc_safety.hbs` primitives (`safe_malloc`, `safe_free`, `safe_swap`) are also
+implemented in `libstdcbs` — they are not macros.
+
 ## 4. Special Modes
 
 ```bash

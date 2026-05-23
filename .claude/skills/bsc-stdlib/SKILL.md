@@ -122,6 +122,45 @@ _Safe void vec_example(void) {
 
 **Note**: `String::from()` is `_Unsafe` — wrap in `_Unsafe {}` block when used in `_Safe` code.
 
+#### Common pitfalls
+
+**`String` is NOT NUL-terminated.** `as_str()` returns a view into the internal buffer
+without a guaranteed `\0` after the last byte. Passing `s.as_str()` to any C function
+expecting a NUL-terminated string (`fopen`, `printf "%s"`, `strcmp`, …) is undefined
+behaviour. Always copy into a `char[]` with a NUL terminator before calling C APIs:
+
+```c
+// Helper (adapt to your project's naming):
+_Safe size_t str_to_cbuf(const String* _Borrow s, char* _Nonnull out, size_t cap) {
+    size_t n = s->length();
+    if (n >= cap) { n = cap - 1; }
+    for (size_t i = 0; i < n; i++) { out[i] = s->at(i); }
+    out[n] = '\0';
+    return n;
+}
+
+// Usage:
+char pathbuf[2048] = {0};
+str_to_cbuf(&_Const full_path, pathbuf, sizeof(pathbuf));
+_Unsafe { FILE* f = fopen(pathbuf, "rb"); ... }
+```
+
+**`String` has no `push_str`.** There is no method to append a `const char*` or another
+`String` in one call. `push` appends a single `char`. Write a helper:
+
+```c
+_Safe void str_append_cstr(String* _Borrow s, const char* _Nonnull src) {
+    for (size_t i = 0; src[i] != '\0'; i++) { s->push(src[i]); }
+}
+
+_Safe void str_append(String* _Borrow dst, const String* _Borrow src) {
+    size_t n = src->length();
+    for (size_t i = 0; i < n; i++) { dst->push(src->at(i)); }
+}
+```
+
+Define both helpers once (e.g. in a `str_util.cbs` module) and reuse everywhere.
+
 ## 5. LinkedList\<T\>
 
 ```c

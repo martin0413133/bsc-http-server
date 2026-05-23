@@ -158,6 +158,51 @@ _Safe int *_Borrow return_nonnull(int *_Borrow p) {
 }
 ```
 
+### Raw `const char*` parameters and C-string return types
+
+Raw pointer parameters default to `_Nullable`. Subscripting or dereferencing a nullable
+pointer in a `_Safe` function is a compile error:
+
+```c
+// ERROR — s is _Nullable by default; s[i] is a null-unsafe deref
+_Safe size_t my_strlen(const char* s) {
+    size_t n = 0;
+    while (s[n]) { n++; }  // error: nullable pointer cannot be dereferenced
+    return n;
+}
+
+// CORRECT — declare _Nonnull; caller guarantees non-null at the call site
+_Safe size_t my_strlen(const char* _Nonnull s) {
+    size_t n = 0;
+    while (s[n]) { n++; }  // ok
+    return n;
+}
+```
+
+The same problem appears in the **return position** when a nullable return feeds a
+`_Nonnull` parameter:
+
+```c
+// Returns nullable by default
+const char* mime_for_ext(const char* _Nonnull ext);
+
+// Parameter is _Nonnull
+_Safe Response make_response(String body, const char* _Nonnull ct);
+
+// ERROR — "cannot pass nullable pointer argument to nonnull parameter"
+_Safe Response f(const char* _Nonnull path) {
+    return make_response(body, mime_for_ext(path));
+}
+
+// FIX — declare the return _Nonnull when the function always returns a valid pointer
+const char* _Nonnull mime_for_ext(const char* _Nonnull ext);
+```
+
+**Practical rule**: any `_Safe` function that subscripts a `const char*` parameter must
+declare it `const char* _Nonnull`. Any function whose return value is passed
+unconditionally to a `_Nonnull` parameter should declare its return `const char* _Nonnull`
+— provided it truly never returns null.
+
 ## 7. Type Casting
 
 With `-nullability-check=all`, casting Nullable to Nonnull in non-safe zones is also checked:
