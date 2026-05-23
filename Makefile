@@ -6,8 +6,12 @@ BINDIR := bin
 
 all: $(BINDIR)/httpd
 
-$(BINDIR)/httpd: src/main.cbs $(wildcard src/*.cbs) $(wildcard include/*.hbs) | $(BINDIR)
+$(BINDIR)/httpd: src/main.cbs $(wildcard src/*.cbs) $(wildcard src/platform/*.cbs) $(wildcard include/*.hbs) | $(BINDIR) check-layers
 	$(CC) $(FLAGS) $(INC) src/main.cbs -o $@ $(LIB)
+
+# Enforce: business src/*.cbs must be _Unsafe-free (adapters in src/platform/ are exempt).
+check-layers:
+	@bash tests/check_no_unsafe.sh
 
 $(BINDIR):
 	mkdir -p $(BINDIR)
@@ -27,4 +31,4 @@ run: $(BINDIR)/httpd
 clean:
 	rm -rf $(BINDIR)
 
-.PHONY: all clean run smoke
+.PHONY: all clean run smoke check-layers
