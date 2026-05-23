@@ -1,0 +1,21 @@
+#ifndef CC_HTTP_RESPONSE_HBS
+#define CC_HTTP_RESPONSE_HBS
+#include "string.hbs"
+
+_Owned struct Response {
+_Public:
+    int status;
+    String status_text;
+    String content_type;
+    String body;
+};
+
+_Safe Response Response::make(int status, const char* _Nonnull status_text);
+_Safe Response Response::ok_text(const char* _Nonnull body, const char* _Nonnull content_type);
+_Safe Response Response::ok_body(String body, const char* _Nonnull content_type); // consumes body
+_Safe Response Response::not_found(void);
+_Safe Response Response::bad_request(void);
+_Safe Response Response::server_error(void);
+// Serialize full wire bytes (status line + headers + CRLF + body).
+_Safe String Response::to_string(const Response* _Borrow this);
+#endif

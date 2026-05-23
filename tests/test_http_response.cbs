@@ -1,0 +1,29 @@
+#include <stdio.h>
+#include <string.h>
+#include "../src/str_util.cbs"
+#include "../src/http_response.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+static _Bool contains(const String* _Borrow s, const char* _Nonnull needle) {
+    char buf[4096]; str_to_cbuf(s, buf, 4096);
+    _Unsafe { return strstr(buf, needle) != NULL; }
+}
+
+int main(void) {
+    Response ok = Response::ok_text("hello", "text/plain");
+    String wire = ok.to_string();
+    CHECK(contains(&_Const wire, "HTTP/1.1 200 OK\r\n"), "status line");
+    CHECK(contains(&_Const wire, "Content-Type: text/plain\r\n"), "ctype");
+    CHECK(contains(&_Const wire, "Content-Length: 5\r\n"), "clen");
+    CHECK(contains(&_Const wire, "\r\n\r\nhello"), "body sep");
+
+    Response nf = Response::not_found();
+    String w2 = nf.to_string();
+    CHECK(contains(&_Const w2, "HTTP/1.1 404 Not Found\r\n"), "404 line");
+
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_http_response OK\n");}
+    return 0;
+}
