@@ -1,0 +1,22 @@
+#include <stdio.h>
+#include "../src/str_util.cbs"
+#include "../src/config.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+int main(void) {
+    const char* text = "# comment\nport = 9090\ndocument_root = public\nthreads=8\n";
+    Config c = Config::parse(text);
+    CHECK(c.port == 9090, "port");
+    CHECK(c.threads == 8, "threads");
+    CHECK(str_eq_cstr(&_Const c.document_root, "public"), "doc root");
+
+    Config d = Config::default_config();
+    CHECK(d.port == 8080, "default port");
+    CHECK(str_eq_cstr(&_Const d.document_root, "www"), "default root");
+
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_config OK\n");}
+    return 0;
+}
