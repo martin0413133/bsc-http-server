@@ -46,21 +46,39 @@ Rationale: BSC generic instantiation and `Type::method` definitions are fragile 
 translation units; single-TU is the proven, low-risk model. Header include guards
 prevent double declaration.
 
-### 4.2 Module layout
+### 4.2 Layering (functional core / imperative shell)
+
+Per project directive: **business code contains zero `_Unsafe`; all `_Unsafe` lives in the
+adapter layer, wrapped behind `_Safe` interfaces.** A `_Safe` function with an `_Unsafe { }`
+block inside is still `_Safe` and callable from business code (the block is a local escape;
+marking the whole function `_Unsafe` would be contagious to every caller).
+
+**Business core (`src/*.cbs`) — 100% `_Safe`, no `_Unsafe`:**
 
 | Module | Responsibility | Key types / ownership |
 |---|---|---|
-| `str_util` | append `const char*` / `String` into a `String` (fills the libcbs `String` gap — no native `push_str`) | free functions on `String* _Borrow` |
-| `config` | parse `config.ini` (`key=value`) → port + document root | `_Owned struct Config { String document_root; int port; }`, RAII |
-| `http_request` | parse method/path/version/headers from raw request bytes | `_Owned struct Request`; built by `Request::parse(const char* _Borrow buf, size_t len)` |
-| `http_response` | build status line + headers + body; `ok` / `not_found` / `bad_request` / `server_error` helpers; serialize to bytes | `_Owned struct Response`; `to_string()` → `String` |
-| `mime` | file extension → Content-Type (static table) | free function returning `const char*` |
-| `file_server` | resolve requested path under doc root, **path-traversal guard**, read file → `Response` | returns `_Owned Response` |
-| `router` | register `(method, path-prefix) → handler fn ptr`; match (exact before prefix) | `_Owned struct Router { Vec<Route> routes; }`; **read-only after startup** |
-| `socket` | POSIX `socket/bind/listen/accept/recv/send/close` wrappers | `_Unsafe` FFI seam; fds are plain `int` |
-| `thread_pool` | fixed N workers; mutex + condvar job queue of client **fds** | `_Unsafe` threading seam; queue holds `int` only |
-| `server` | accept loop → enqueue fd → worker parses request, routes (static file or handler), sends response | aggregates modules |
-| `main` | load config, register demo routes (e.g. `/hello`), start server; `#include`s all `.cbs` | entry point |
+| `str_util` | append/copy/compare on `String` (fills libcbs `String` gap — no native `push_str`) | `_Safe` free functions |
+| `mime` | file extension → Content-Type (pure safe char matching, no libc) | `_Safe`, returns `const char*` literal |
+| `http_request` | parse method/path/version/headers from raw bytes | `_Owned struct Request`; `Request::parse(const char* _Nonnull raw)` |
+| `http_response` | build status/headers/body; `ok`/`not_found`/`bad_request`/`server_error`; serialize | `_Owned struct Response`; `to_string()` → `String` |
+| `config` | parse `config.ini` text (`key=value`) → port/threads/doc-root; defaults | `_Owned struct Config`; `Config::parse(text)`, `default_config()` (NO file IO) |
+| `router` | register `(method, path) → handler`; exact match; `path_is_safe` traversal guard | `_Owned struct Router { Vec<Route> }` |
+| `file_server` | resolve path under doc root, traversal guard, read via `fs` adapter → `Response` | `_Safe serve_static(cfg, req)` |
+| `handler` | pure `handle_request(cfg, router, raw_bytes) → Response` — the functional core | `_Safe`, socket-free, unit-testable |
+
+**Adapter layer (`src/platform/*.cbs`) — `_Safe` interface, minimal `_Unsafe` inside:**
+
+| Module | Responsibility | Seam |
+|---|---|---|
+| `net` | `_Safe` socket listen/accept; recv → `String`; send `const String*` (length-based); close | sockets/syscalls |
+| `fs` | `_Safe` read entire file → `String` + ok flag | `fopen`/`fread` |
+| `log` | `_Safe` request/diagnostic logging | `fprintf` |
+| `thread_pool` | `_Safe` start/submit/shutdown; fixed N workers; mutex+condvar queue of client **fds** | `pthread`; worker is adapter-internal C-ABI |
+| `runtime` | imperative shell: build `ServerCtx`, accept loop, recv→`handle_request`→send, spawn pool | raw `ServerCtx*`/`void*` across threads |
+| `main` | load config text via `fs`, parse, register demo routes, run `runtime` | entry point; `#include`s all `.cbs` |
+
+Enforcement: `tests/check_no_unsafe.sh` greps the business `src/*.cbs` files and fails the
+build if any `_Unsafe` token appears there (the adapter dir `src/platform/` is exempt).
 
 ### 4.3 Component interfaces (sketch)
 
@@ -71,10 +89,10 @@ _Owned struct Header { _Public: String name; String value; };
 // threading seam); holds borrows/pointers to the startup-built Config and Router.
 struct ServerCtx { const Config* config; const Router* router; };
 
-// config.hbs
-_Owned struct Config { _Public: String document_root; int port; };
-_Safe Config Config::default(void);
-        Config Config::from_file(const char* path);   // _Unsafe seam for file IO
+// config.hbs (business — parse only; file text is loaded by the runtime via the fs adapter)
+_Owned struct Config { _Public: int port; int threads; String document_root; };
+_Safe Config Config::default_config(void);
+_Safe Config Config::parse(const char* _Nonnull text);
 
 // http_request.hbs
 _Owned struct Request {
@@ -104,18 +122,24 @@ _Safe Router Router::new(void);
 _Safe void   Router::add(Router* _Borrow this, const char* method, const char* prefix, Handler h);
 _Safe Handler _Nullable Router::match(const Router* _Borrow this, const Request* _Borrow req);
 
-// socket.hbs  (all _Unsafe internally; fds are int)
-int  socket_listen(int port);          // returns listen fd or -1
-int  socket_accept(int listen_fd);     // returns client fd or -1
-ssize_t socket_recv(int fd, char* buf, size_t cap);
-ssize_t socket_send(int fd, const char* buf, size_t len);
-void socket_close(int fd);
+// platform/net.hbs  (adapter: _Safe interface, _Unsafe inside; fds are int)
+_Safe int  net_listen(int port, int backlog);          // listen fd or -1
+_Safe int  net_accept(int listen_fd);                  // client fd or -1
+_Safe _Bool net_recv_string(int fd, String* _Borrow out);  // fill out with request bytes
+_Safe _Bool net_send_string(int fd, const String* _Borrow data);  // length-based send
+_Safe void net_close(int fd);
 
-// thread_pool.hbs
-_Owned struct ThreadPool { /* workers, mutex, cond, queue of int fds, stop flag */ };
-ThreadPool ThreadPool::start(int n_workers, ServerCtx* ctx);  // _Unsafe threading seam
-void       ThreadPool::submit(ThreadPool* _Borrow this, int client_fd);
-void       ThreadPool::shutdown(ThreadPool* _Borrow this);
+// platform/fs.hbs (adapter)
+_Safe _Bool fs_read_file(const char* _Nonnull path, String* _Borrow out);
+
+// platform/handler — the pure functional core (business, _Safe, socket-free)
+_Safe Response handle_request(const Config* _Borrow cfg, const Router* _Borrow router,
+                              const char* _Nonnull raw);
+
+// platform/thread_pool.hbs (adapter)
+_Safe int  thread_pool_start(struct ThreadPool* _Nonnull tp, int n, ConnHandler h, void* _Nonnull ctx);
+_Safe void thread_pool_submit(struct ThreadPool* _Nonnull tp, int client_fd);
+_Safe void thread_pool_shutdown(struct ThreadPool* _Nonnull tp);
 ```
 
 (Exact signatures finalized during implementation; this is the shape.)
@@ -136,17 +160,20 @@ void       ThreadPool::shutdown(ThreadPool* _Borrow this);
 
 ## 6. The `_Unsafe` Boundary
 
-Exactly three seams; everything else is `_Safe`:
+**All `_Unsafe` lives in `src/platform/` (the adapter layer); business `src/*.cbs` has none.**
+Each adapter function is declared `_Safe` and wraps the minimum unsafe lines in an
+`_Unsafe { }` block, so business callers stay `_Safe`. The seams:
 
-1. **Syscalls / FFI** — socket and file operations (`socket`, `bind`, `listen`,
-   `accept`, `recv`, `send`, `close`, `open`/`read`/`fstat`), and `printf`/`fprintf`
-   logging.
-2. **Threading** — `pthread_create`, `pthread_mutex_*`, `pthread_cond_*`, and the
-   raw context pointer passed to the worker function.
-3. **Raw string boundary** — `const char* ` ↔ `String` via `String::from` /
-   `__take_from_raw` / `__move_to_raw` where the request buffer enters the safe zone.
+1. **`net`** — `socket`, `bind`, `listen`, `accept`, `recv`, `send`, `close`. recv copies
+   bytes into a `String`; send iterates a `const String*` and writes length-based.
+2. **`fs`** — `fopen`/`fread`/`fclose`; returns file contents as an owned `String`.
+3. **`log`** — `fprintf` to stderr.
+4. **`thread_pool` / `runtime`** — `pthread_*`; the C-ABI worker; and the raw
+   `ServerCtx*`/`void*` carried across the thread boundary. The business `handle_request`
+   it ultimately calls is `_Safe`.
 
-Parsing, routing, response building, MIME lookup, and config storage are all `_Safe`.
+Parsing, routing, response building, MIME lookup, config parsing, file-server logic, and
+the `handle_request` core are all `_Safe` with **no `_Unsafe`**.
 
 ## 7. Error Handling
 
