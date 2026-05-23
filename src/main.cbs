@@ -1,0 +1,42 @@
+// cc_httpd entry point — single translation unit aggregator.
+// Business core (no _Unsafe):
+#include "str_util.cbs"
+#include "mime.cbs"
+#include "http_request.cbs"
+#include "http_response.cbs"
+#include "config.cbs"
+#include "router.cbs"
+#include "platform/fs.cbs"
+#include "file_server.cbs"
+#include "handler.cbs"
+// Adapters (_Unsafe inside, _Safe interface):
+#include "platform/net.cbs"
+#include "platform/log.cbs"
+#include "platform/thread_pool.cbs"
+#include "platform/runtime.cbs"
+
+#include "bishengc_safety.hbs"
+
+// Demo dynamic route.
+_Safe Response route_hello(const Request* _Borrow req) {
+    Response resp = Response::ok_text("<h1>Hello from a cc_httpd route!</h1>", "text/html");
+    return resp;
+}
+
+_Safe int main(void) {
+    // Load config text via the fs adapter, then parse (business).
+    String text = String::new();
+    fs_read_file("config.ini", &_Mut text);
+    char cbuf[4096] = {0};
+    str_to_cbuf(&_Const text, cbuf, 4096);
+    Config config = Config::parse(cbuf);
+
+    Router router = Router::new();
+    router.add("GET", "/hello", route_hello);
+
+    // Move config/router onto the heap so the runtime can share them with threads.
+    Config *_Owned cfgp = safe_malloc(config);
+    Router *_Owned rtp = safe_malloc(router);
+    int rc = runtime_serve(cfgp, rtp);
+    return rc;
+}

@@ -1,0 +1,71 @@
+#include "runtime.hbs"
+#include "net.hbs"
+#include "log.hbs"
+#include "thread_pool.hbs"
+#include "../../include/handler.hbs"
+#include "../../include/str_util.hbs"
+#include "../../include/http_response.hbs"
+#include "bishengc_safety.hbs"
+#include <stdio.h>
+
+#define RT_REQ_BUF 8200
+
+// Worker callback (matches ConnHandler). _Safe so the _Owned locals (reqbuf/resp/wire)
+// are RAII-managed; only the void*/raw bridge is _Unsafe.
+_Safe void runtime_handle_conn(int fd, void* _Nonnull ctx_raw) {
+    String reqbuf = String::new();
+    if (!net_recv_string(fd, &_Mut reqbuf)) {
+        net_close(fd);
+        return;
+    }
+    char rawc[RT_REQ_BUF] = {0};
+    str_to_cbuf(&_Const reqbuf, rawc, RT_REQ_BUF);
+
+    // Bridge raw shared context -> borrows for the business core.
+    struct ServerCtx* ctx = _Unsafe((struct ServerCtx*)ctx_raw);
+    const Config* _Borrow cfg = _Unsafe(&_Const *(ctx->config));
+    const Router* _Borrow rt  = _Unsafe(&_Const *(ctx->router));
+
+    Response resp = handle_request(cfg, rt, rawc);
+    String wire = resp.to_string();
+    net_send_string(fd, &_Const wire);
+
+    // access log: "METHOD PATH" from the request line
+    char method[16] = {0};
+    char path[256] = {0};
+    size_t i = 0;
+    size_t k = 0;
+    while (rawc[i] != '\0' && rawc[i] != ' ' && k < 15) { method[k] = rawc[i]; k++; i++; }
+    while (rawc[i] == ' ') { i++; }
+    k = 0;
+    while (rawc[i] != '\0' && rawc[i] != ' ' && rawc[i] != '\r' && rawc[i] != '\n' && k < 255) { path[k] = rawc[i]; k++; i++; }
+    log_request(method, path, resp.status);
+
+    net_close(fd);
+}
+
+_Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
+    int port = cfg->port;
+    int threads = cfg->threads;
+    _Unsafe {
+        // Move both onto raw pointers shared (read-only) with worker threads.
+        // They live for the whole run; consumed here so no later free is owed.
+        static struct ServerCtx ctx;
+        ctx.config = (const Config* _Nonnull)__move_to_raw(cfg);
+        ctx.router = (const Router* _Nonnull)__move_to_raw(router);
+
+        int listen_fd = net_listen(port, 128);
+        if (listen_fd < 0) { return -1; }
+
+        static struct ThreadPool pool;
+        if (thread_pool_start(&pool, threads, runtime_handle_conn, &ctx) != 0) { return -1; }
+
+        fprintf(stderr, "cc_httpd listening on port %d (threads=%d)\n", port, threads);
+        for (;;) {
+            int client = net_accept(listen_fd);
+            if (client < 0) { continue; }
+            thread_pool_submit(&pool, client);
+        }
+    }
+    return 0;
+}
