@@ -2,5 +2,5 @@
 #define CC_MIME_HBS
 // Returns a static Content-Type string for the file extension in `path`.
 // Pure safe-zone logic — no libc, no _Unsafe.
-_Safe const char* mime_for_path(const char* _Nonnull path);
+_Safe const char* _Nonnull mime_for_path(const char* _Nonnull path);
 #endif

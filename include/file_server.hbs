@@ -1,0 +1,10 @@
+#ifndef CC_FILE_SERVER_HBS
+#define CC_FILE_SERVER_HBS
+#include "../include/http_request.hbs"
+#include "../include/http_response.hbs"
+#include "../include/config.hbs"
+
+// Serve a static file for `req` under config->document_root. Always returns a Response.
+// Business logic; reads files via the fs adapter (no _Unsafe here).
+_Safe Response serve_static(const Config* _Borrow config, const Request* _Borrow req);
+#endif

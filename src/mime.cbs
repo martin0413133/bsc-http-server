@@ -12,7 +12,7 @@ _Safe _Bool suffix_eq(const char* _Nonnull s, size_t start, const char* _Nonnull
     return s[start + j] == '\0';
 }
 
-_Safe const char* mime_for_path(const char* _Nonnull path) {
+_Safe const char* _Nonnull mime_for_path(const char* _Nonnull path) {
     size_t last_dot = 0;
     _Bool has_dot = 0;
     for (size_t i = 0; path[i] != '\0'; i++) {
