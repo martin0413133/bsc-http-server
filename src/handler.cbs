@@ -1,0 +1,22 @@
+#include "../include/handler.hbs"
+#include "../include/http_request.hbs"
+#include "../include/file_server.hbs"
+
+_Safe Response handle_request(const Config* _Borrow cfg, const Router* _Borrow router,
+                              const char* _Nonnull raw) {
+    Request req = Request::parse(raw);
+    if (!req.ok) {
+        Response resp = Response::bad_request();
+        return resp;
+    }
+    Handler h = router->match(&_Const req);
+    // NOTE: bind the result to a local before returning. `return call(&_Const req)`
+    // destroys the local `req` before the callee finishes reading the borrow
+    // (destructor-ordering codegen bug) — a named temporary keeps req alive.
+    if (h != nullptr) {
+        Response resp = h(&_Const req);
+        return resp;
+    }
+    Response resp = serve_static(cfg, &_Const req);
+    return resp;
+}
