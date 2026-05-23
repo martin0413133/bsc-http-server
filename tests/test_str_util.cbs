@@ -1,0 +1,26 @@
+#include <stdio.h>
+#include <string.h>
+#include "../src/str_util.cbs"
+
+static int fails = 0;
+#define CHECK(cond, msg) do { if(!(cond)){ _Unsafe{printf("FAIL: %s\n", msg);} fails++; } } while(0)
+
+int main(void) {
+    String s = String::new();
+    str_append_cstr(&_Mut s, "GET ");
+    str_append_cstr(&_Mut s, "/x");
+    CHECK(s.length() == 6, "append length");
+
+    // str_to_cbuf null-terminates into a C buffer
+    char buf[16];
+    str_to_cbuf(&_Const s, buf, 16);
+    _Unsafe { CHECK(strcmp(buf, "GET /x") == 0, "to_cbuf content"); }
+
+    // str_eq_cstr
+    CHECK(str_eq_cstr(&_Const s, "GET /x"), "eq true");
+    CHECK(!str_eq_cstr(&_Const s, "GET /y"), "eq false");
+
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_str_util OK\n");}
+    return 0;
+}
