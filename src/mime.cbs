@@ -1,0 +1,21 @@
+#include "../include/mime.hbs"
+#include <string.h>
+
+// Find the last '.' in path; compare suffix case-sensitively (lowercase assets).
+const char* mime_for_path(const char* _Nonnull path) {
+    _Unsafe {
+        const char* dot = strrchr(path, '.');
+        if (dot == NULL) { return "application/octet-stream"; }
+        const char* ext = dot + 1;
+        if (strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0) { return "text/html"; }
+        if (strcmp(ext, "css") == 0)  { return "text/css"; }
+        if (strcmp(ext, "js") == 0)   { return "application/javascript"; }
+        if (strcmp(ext, "json") == 0) { return "application/json"; }
+        if (strcmp(ext, "png") == 0)  { return "image/png"; }
+        if (strcmp(ext, "jpg") == 0 || strcmp(ext, "jpeg") == 0) { return "image/jpeg"; }
+        if (strcmp(ext, "gif") == 0)  { return "image/gif"; }
+        if (strcmp(ext, "svg") == 0)  { return "image/svg+xml"; }
+        if (strcmp(ext, "txt") == 0)  { return "text/plain"; }
+        return "application/octet-stream";
+    }
+}

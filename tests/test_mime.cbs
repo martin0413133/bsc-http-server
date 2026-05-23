@@ -1,0 +1,20 @@
+#include <stdio.h>
+#include <string.h>
+#include "../src/mime.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+int main(void) {
+    _Unsafe {
+        CHECK(strcmp(mime_for_path("a/index.html"), "text/html") == 0, "html");
+        CHECK(strcmp(mime_for_path("style.css"), "text/css") == 0, "css");
+        CHECK(strcmp(mime_for_path("app.js"), "application/javascript") == 0, "js");
+        CHECK(strcmp(mime_for_path("pic.png"), "image/png") == 0, "png");
+        CHECK(strcmp(mime_for_path("noext"), "application/octet-stream") == 0, "default");
+        CHECK(strcmp(mime_for_path("weird.xyz"), "application/octet-stream") == 0, "unknown");
+    }
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_mime OK\n");}
+    return 0;
+}
