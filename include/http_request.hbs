@@ -1,0 +1,22 @@
+#ifndef CC_HTTP_REQUEST_HBS
+#define CC_HTTP_REQUEST_HBS
+#include "string.hbs"
+#include "vec.hbs"
+
+_Owned struct Header { _Public: String name; String value; };
+
+_Owned struct Request {
+_Public:
+    String method;
+    String path;
+    String version;
+    Vec<Header> headers;
+    String body;
+    _Bool ok;
+};
+
+// Parse a NUL-terminated raw request. On malformed input, ok = false.
+_Safe Request Request::parse(const char* _Nonnull raw);
+// Case-sensitive header lookup; nullptr if absent. Borrow tied to `this`.
+_Safe const String* _Borrow _Nullable Request::get_header(const Request* _Borrow this, const char* _Nonnull name);
+#endif
