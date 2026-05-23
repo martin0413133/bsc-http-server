@@ -65,6 +65,12 @@ prevent double declaration.
 ### 4.3 Component interfaces (sketch)
 
 ```c
+// common types
+_Owned struct Header { _Public: String name; String value; };
+// ServerCtx: the read-only shared context handed to each worker (raw ptr across the
+// threading seam); holds borrows/pointers to the startup-built Config and Router.
+struct ServerCtx { const Config* config; const Router* router; };
+
 // config.hbs
 _Owned struct Config { _Public: String document_root; int port; };
 _Safe Config Config::default(void);
