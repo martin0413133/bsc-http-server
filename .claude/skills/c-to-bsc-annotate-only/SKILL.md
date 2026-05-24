@@ -105,6 +105,13 @@ Node *_Owned n = SAFE_CALLOC(Node);      /* zeroed (shim ships a 5-line safe_cal
 SAFE_FREE(p);                            /* consume — leak/UAF still checked */
 ```
 
+> **Large `T`? Don't `SAFE_MALLOC` it.** `safe_malloc<T>(T t)` takes the init **by value**, so
+> the whole `T` is materialized on the stack (verified: a 1 MB `T` → ~2 MB caller frame **plus**
+> ~1 MB inside `safe_malloc`), risking stack overflow. For a large `T` (big inline buffer/array):
+> use `SAFE_CALLOC(T)` — no value copy, ~24 B frame — when zeroed is acceptable, or raw `malloc`
+> + initialize fields through the pointer in `_Unsafe` (no full-`T` stack temporary). Build with
+> `-Wframe-larger-than=N` to catch oversized frames.
+
 **This also dissolves the owned-field-heap-struct problem.** You can't assign `_Owned` fields
 one-by-one in the safe zone, but you *can* aggregate-init a value and let `SAFE_MALLOC` move it
 onto the heap — **pure `_Safe`, no `_Unsafe` block**:
@@ -185,6 +192,7 @@ per `bsc-design`, accepting the dual-build loss for those files).
 | Reaching for full `c-to-bsc` (member fns, libcbs, `_Owned struct`+destructor) | Over-disrupts and **kills the C build** per file. Stay annotation-only unless you've decided to drop dual-build for that file. |
 | Expecting annotated C to compile as C without the shim | Bare `_Owned` is a parse error under `-xc`. The shim header is mandatory for the C build. |
 | Writing `safe_malloc<T>` directly in the source | The `<T>` generic syntax breaks the C build. Use the `SAFE_MALLOC(T, …)` / `SAFE_CALLOC(T)` macros (BSC → `safe_malloc<T>`, C → `malloc`/`calloc`). |
+| `SAFE_MALLOC`-ing a large `T` (big inline buffer/array) | `safe_malloc` takes `T` **by value** → `T` is built on the stack (verified: 1 MB `T` → ~2 MB caller frame + ~1 MB in `safe_malloc` → stack-overflow risk). Use `SAFE_CALLOC(T)` (no copy, ~24 B frame) or raw `malloc` + field-wise init in `_Unsafe`. `-Wframe-larger-than=N` catches it. |
 | Trusting "it compiled, so it's safe" | The return-borrow codegen UAF (upstream IJC66K) passes the checker but is UAF. **Always run valgrind.** |
 | Dropping the `#ifndef __bishengc` guard (or force-defining the qualifiers under BSC) | Then `_Owned` etc. erase under BSC too and you lose all checking. The guard is what keeps the shim inert under `-x bsc`. |
 | Annotating a param `_Owned` when the function only reads | `_Owned` = consume (caller's var dies). Reads take `const T *_Borrow`. (See `c-to-bsc` Step 2.5.) |

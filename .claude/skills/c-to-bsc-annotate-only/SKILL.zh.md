@@ -98,6 +98,12 @@ Node *_Owned n = SAFE_CALLOC(Node);      /* 清零(shim 自带 5 行 safe_calloc
 SAFE_FREE(p);                            /* 消费 —— 泄漏/UAF 仍受检 */
 ```
 
+> **`T` 很大?别用 `SAFE_MALLOC`。** `safe_malloc<T>(T t)` 按**值**接收初值,整个 `T` 会落在栈上
+> (实测:1 MB 的 `T` → 调用方约 2 MB 栈帧,外加 `safe_malloc` 内部约 1 MB),有爆栈风险。对大 `T`
+> (大块内联缓冲/数组):可接受清零时用 `SAFE_CALLOC(T)`(不拷值,约 24 B 栈帧),或裸 `malloc` +
+> 在 `_Unsafe` 里通过指针逐字段初始化(不产生整个 `T` 的栈临时量)。用 `-Wframe-larger-than=N`
+> 编译可揪出超大栈帧。
+
 **这还顺带化解了"带 `_Owned` 字段堆结构"的难题。** 安全区里不能逐字段给 `_Owned` 字段赋值,
 但你**可以**先聚合初始化一个值,再让 `SAFE_MALLOC` 把它 move 到堆上 —— **纯 `_Safe`,无 `_Unsafe`**:
 
@@ -170,6 +176,7 @@ _Safe int                    fclose(FILE *_Owned stream);   /* consume == free(�
 | 直接上完整 `c-to-bsc`(成员函数、libcbs、`_Owned struct`+析构) | 扰动过大且**逐文件杀死 C 构建**。除非已决定放弃该文件的双编译,否则坚持只标注。 |
 | 以为标注后的 C 不用 shim 也能当 C 编 | 裸 `_Owned` 在 `-xc` 下是 parse 错误。shim 头对 C 构建是必需的。 |
 | 在源码里直接写 `safe_malloc<T>` | `<T>` 泛型语法破坏 C 构建。改用 `SAFE_MALLOC(T, …)` / `SAFE_CALLOC(T)` 宏(BSC → `safe_malloc<T>`,C → `malloc`/`calloc`)。 |
+| 对大 `T`(大块内联缓冲/数组)用 `SAFE_MALLOC` | `safe_malloc` 按**值**收 `T` → `T` 在栈上构造(实测:1 MB `T` → 调用方约 2 MB 栈帧 + `safe_malloc` 内约 1 MB → 爆栈风险)。改用 `SAFE_CALLOC(T)`(不拷值,约 24 B 栈帧)或裸 `malloc` + 在 `_Unsafe` 里逐字段初始化。`-Wframe-larger-than=N` 可揪出。 |
 | 相信"它编过了,所以安全" | return-borrow 的 codegen UAF(上游 IJC66K)能过检查器但确是 UAF。**务必跑 valgrind。** |
 | 去掉 `#ifndef __bishengc` 守卫(或在 BSC 下强行定义这些限定符) | 那么 `_Owned` 等在 BSC 下也被擦除,你会丢掉全部检查。守卫正是让 shim 在 `-x bsc` 下保持惰性的东西。 |
 | 函数只读却把参数标成 `_Owned` | `_Owned` = 消费(调用方的变量随之失效)。只读应取 `const T *_Borrow`。(见 `c-to-bsc` Step 2.5。) |
