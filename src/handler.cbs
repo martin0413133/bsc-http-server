@@ -1,6 +1,7 @@
 #include "../include/handler.hbs"
 #include "../include/http_request.hbs"
 #include "../include/file_server.hbs"
+#include "../include/str_util.hbs"   // str_eq_cstr
 
 _Safe Response handle_request(const Config* _Borrow cfg, const Router* _Borrow router,
                               const char* _Nonnull raw) {
@@ -15,6 +16,11 @@ _Safe Response handle_request(const Config* _Borrow cfg, const Router* _Borrow r
     // (destructor-ordering codegen bug) — a named temporary keeps req alive.
     if (h != nullptr) {
         Response resp = h(&_Const req);
+        return resp;
+    }
+    // Static serving is read-only: only GET is supported. Other methods get 405.
+    if (!str_eq_cstr(&_Const req.method, "GET")) {
+        Response resp = Response::method_not_allowed();
         return resp;
     }
     Response resp = serve_static(cfg, &_Const req);

@@ -7,8 +7,15 @@
 #include "../../include/http_response.hbs"
 #include "bishengc_safety.hbs"
 #include <stdio.h>
+#include <signal.h>
+#include <string.h>
+#include <unistd.h>
 
 #define RT_REQ_BUF 8200
+
+// Set by SIGINT/SIGTERM; the accept loop checks it to break out and drain workers.
+static volatile sig_atomic_t g_shutdown = 0;
+static void rt_on_signal(int sig) { (void)sig; g_shutdown = 1; }
 
 // Worker callback (matches ConnHandler). _Safe so the _Owned locals (reqbuf/resp/wire)
 // are RAII-managed; only the void*/raw bridge is _Unsafe.
@@ -48,8 +55,21 @@ _Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
     int port = cfg->port;
     int threads = cfg->threads;
     _Unsafe {
+        // A client that drops the connection mid-response makes send() raise SIGPIPE,
+        // whose default action kills the process. Ignore it so send() returns EPIPE
+        // (handled by net_send_string) instead of taking the whole server down.
+        signal(SIGPIPE, SIG_IGN);
+
+        // SIGINT/SIGTERM -> graceful shutdown. No SA_RESTART, so a signal makes the
+        // blocked accept() return EINTR and the loop can observe g_shutdown.
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = rt_on_signal;
+        sigaction(SIGINT, &sa, NULL);
+        sigaction(SIGTERM, &sa, NULL);
+
         // Move both onto raw pointers shared (read-only) with worker threads.
-        // They live for the whole run; consumed here so no later free is owed.
+        // Intentional process-lifetime allocation — reclaimed by the OS at exit.
         static struct ServerCtx ctx;
         ctx.config = (const Config* _Nonnull)__move_to_raw(cfg);
         ctx.router = (const Router* _Nonnull)__move_to_raw(router);
@@ -61,11 +81,20 @@ _Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
         if (thread_pool_start(&pool, threads, runtime_handle_conn, &ctx) != 0) { return -1; }
 
         fprintf(stderr, "cc_httpd listening on port %d (threads=%d)\n", port, threads);
-        for (;;) {
+        while (!g_shutdown) {
             int client = net_accept(listen_fd);
-            if (client < 0) { continue; }
+            if (client < 0) {
+                if (g_shutdown) { break; }
+                usleep(1000);   // transient accept error (e.g. EMFILE): back off, don't hot-spin
+                continue;
+            }
             thread_pool_submit(&pool, client);
         }
+
+        // Drain in-flight requests, stop workers, release the listen socket.
+        fprintf(stderr, "cc_httpd shutting down...\n");
+        thread_pool_shutdown(&pool);
+        net_close(listen_fd);
     }
     return 0;
 }

@@ -8,5 +8,4 @@ _Safe void str_append(String* _Borrow dst, const String* _Borrow src);
 // Copies up to cap-1 bytes of s into out and NUL-terminates. Returns bytes written.
 _Safe size_t str_to_cbuf(const String* _Borrow s, char* _Nonnull out, size_t cap);
 _Safe _Bool str_eq_cstr(const String* _Borrow s, const char* _Nonnull cstr);
-_Safe _Bool str_starts_with(const String* _Borrow s, const char* _Nonnull prefix);
 #endif

@@ -47,10 +47,10 @@ _Safe Response Response::bad_request(void) {
     return r;
 }
 
-_Safe Response Response::server_error(void) {
-    Response r = Response::make(500, "Internal Server Error");
+_Safe Response Response::method_not_allowed(void) {
+    Response r = Response::make(405, "Method Not Allowed");
     str_append_cstr(&_Mut r.content_type, "text/html");
-    str_append_cstr(&_Mut r.body, "<h1>500 Internal Server Error</h1>");
+    str_append_cstr(&_Mut r.body, "<h1>405 Method Not Allowed</h1>");
     return r;
 }
 

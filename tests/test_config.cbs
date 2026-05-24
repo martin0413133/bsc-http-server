@@ -17,6 +17,12 @@ int main(void) {
     CHECK(d.port == 8080, "default port");
     CHECK(str_eq_cstr(&_Const d.document_root, "www"), "default root");
 
+    String bad = String::new();
+    str_append_cstr(&_Mut bad, "port = 99999\nthreads = 0\n");
+    Config e = Config::parse(&_Const bad);
+    CHECK(e.port == 8080, "out-of-range port -> default 8080");
+    CHECK(e.threads == 1, "threads floor 1");
+
     if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
     _Unsafe{printf("test_config OK\n");}
     return 0;

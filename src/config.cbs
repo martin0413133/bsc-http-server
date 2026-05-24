@@ -55,6 +55,10 @@ _Safe Config Config::parse(const String* _Borrow text) {
         else if (str_eq_cstr(&_Const key, "document_root")) { safe_swap(&_Mut dr, &_Mut val); }
     }
 
+    // Reject out-of-range values (parse_int has no overflow guard); fall back to defaults.
+    if (port < 1 || port > 65535) { port = 8080; }
+    if (threads < 1) { threads = 1; }
+
     Config c = { .port = port, .threads = threads, .document_root = dr };
     return c;
 }

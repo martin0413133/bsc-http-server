@@ -2,11 +2,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #define NET_RECV_BUF 8192
 #define NET_SEND_CHUNK 4096
+#define NET_TIMEOUT_SEC 10   // per-connection recv/send timeout — bounds slow/idle clients
 
 _Safe int net_listen(int port, int backlog) {
     _Unsafe {
@@ -26,7 +28,19 @@ _Safe int net_listen(int port, int backlog) {
 }
 
 _Safe int net_accept(int listen_fd) {
-    _Unsafe { return accept(listen_fd, NULL, NULL); }
+    _Unsafe {
+        int fd = accept(listen_fd, NULL, NULL);
+        if (fd >= 0) {
+            // Bound a client that connects then stalls: recv/send fail with EAGAIN
+            // after the timeout, so a slow/idle peer can't pin a worker thread forever.
+            struct timeval tv;
+            tv.tv_sec = NET_TIMEOUT_SEC;
+            tv.tv_usec = 0;
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        }
+        return fd;
+    }
 }
 
 _Safe _Bool net_recv_string(int fd, String* _Borrow out) {

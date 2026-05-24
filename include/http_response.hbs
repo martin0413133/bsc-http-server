@@ -15,7 +15,8 @@ _Safe Response Response::ok_text(const char* _Nonnull body, const char* _Nonnull
 _Safe Response Response::ok_body(String body, const char* _Nonnull content_type); // consumes body
 _Safe Response Response::not_found(void);
 _Safe Response Response::bad_request(void);
-_Safe Response Response::server_error(void);
+// 405 for a known resource reached with a method the server doesn't serve (only GET).
+_Safe Response Response::method_not_allowed(void);
 // Serialize full wire bytes (status line + headers + CRLF + body).
 _Safe String Response::to_string(const Response* _Borrow this);
 #endif

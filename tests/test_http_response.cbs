@@ -23,6 +23,10 @@ int main(void) {
     String w2 = nf.to_string();
     CHECK(contains(&_Const w2, "HTTP/1.1 404 Not Found\r\n"), "404 line");
 
+    Response mna = Response::method_not_allowed();
+    String w3 = mna.to_string();
+    CHECK(contains(&_Const w3, "HTTP/1.1 405 Method Not Allowed\r\n"), "405 line");
+
     if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
     _Unsafe{printf("test_http_response OK\n");}
     return 0;

@@ -36,6 +36,9 @@ int main(void) {
     Response r4 = handle_request(&_Const cfg, &_Const rt, "garbage");
     CHECK(r4.status == 400, "bad request status");
 
+    Response r5 = handle_request(&_Const cfg, &_Const rt, "POST / HTTP/1.1\r\n\r\n");
+    CHECK(r5.status == 405, "non-GET static -> 405");
+
     if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
     _Unsafe{printf("test_handler OK\n");}
     return 0;
