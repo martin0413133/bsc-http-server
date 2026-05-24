@@ -48,30 +48,71 @@ the **shim** below is mandatory for the C build.
 ## The one piece of infra: the shim header
 
 The BSC compiler predefines `__bishengc` (verified: `#define __bishengc 1`; plain clang does
-NOT define it). Guard the shim with it so a **single, unconditional `#include`** is correct in
-both builds — inert under BSC (qualifiers stay real keywords), erasing under plain C. No
-per-build `-include` juggling; can't leak into the BSC build, can't be forgotten on the C
-build. `nullptr` maps to `((void*)0)` (self-contained — no `<stddef.h>`/`NULL` dependency).
+NOT define it). Key the shim off it so a **single, unconditional `#include`** is correct in
+both builds: under BSC it pulls in `bishengc_safety.hbs` and keeps the qualifiers as real
+keywords; under plain C it pulls in `<stdlib.h>`, erases the qualifiers, and maps the
+allocation macros to raw `malloc`/`calloc`/`free`. One header, no per-build `-include`, can't
+leak into the BSC build or be forgotten on the C build. `nullptr` → `((void*)0)` (no
+`<stddef.h>`/`NULL` dependency).
 
 ```c
-/* bsc_shim.h — #include this everywhere; self-activates only under non-BSC compilers */
-#ifndef __bishengc
-#define _Safe
-#define _Unsafe
-#define _Owned
-#define _Borrow
-#define _Nonnull
-#define _Nullable
-#define _Const
-#define _Mut
-#define nullptr ((void*)0)
-#define __take_from_raw(p) (p)
-#define __move_to_raw(p)   (p)
+/* bsc_shim.h — #include this everywhere; self-activates per compiler */
+#ifdef __bishengc
+#  include "bishengc_safety.hbs"                  /* safe_malloc / safe_free — BSC only */
+#  define SAFE_MALLOC(T, init) safe_malloc<T>(init)    /* alloc + init -> T *_Owned (_Safe) */
+#  define SAFE_CALLOC(T)       safe_malloc<T>((T){0})  /* zeroed T (no safe_calloc in this libcbs) */
+#  define SAFE_FREE(p)         safe_free((void *_Owned)(p))
+#else
+#  include <stdlib.h>                             /* malloc / free — C only */
+#  define _Safe
+#  define _Unsafe
+#  define _Owned
+#  define _Borrow
+#  define _Nonnull
+#  define _Nullable
+#  define _Const
+#  define _Mut
+#  define nullptr ((void*)0)
+#  define __take_from_raw(p) (p)
+#  define __move_to_raw(p)   (p)
+#  define SAFE_MALLOC(T, init) ({ T *_s = (T *)malloc(sizeof(T)); if (_s) *_s = (init); _s; })
+#  define SAFE_CALLOC(T)       ((T *)calloc(1, sizeof(T)))
+#  define SAFE_FREE(p)         free(p)
 #endif
 ```
 
-Verified: with this header `#include`d, a leak is still caught under `-x bsc` (shim inert) and
-the same source compiles clean under `-xc` (shim erases), with no libc header required.
+Verified under both compilers: a leak is still caught under `-x bsc` (qualifiers live), and the
+same source compiles clean under `-xc` (qualifiers erase, macros fall back to malloc/calloc/free).
+The C-side `SAFE_MALLOC` uses a GNU/clang statement-expression (`({ … })`) to alloc-and-init in
+one expression — available in gcc and clang (the toolchains here).
+
+## Preferred allocation: `SAFE_MALLOC` / `SAFE_CALLOC` / `SAFE_FREE`
+
+Under BSC these map to `safe_malloc<T>` / `safe_free` — both `_Safe`, so **no `_Unsafe`, no
+`__take_from_raw`**. Prefer them over raw `malloc`+`__take_from_raw` for fixed-type allocations:
+
+```c
+int  *_Owned p = SAFE_MALLOC(int, 42);   /* alloc + init */
+Node *_Owned n = SAFE_CALLOC(Node);      /* zeroed (this libcbs has no safe_calloc; macro uses safe_malloc<T>((T){0})) */
+SAFE_FREE(p);                            /* consume — leak/UAF still checked */
+```
+
+**This also dissolves the owned-field-heap-struct problem.** You can't assign `_Owned` fields
+one-by-one in the safe zone, but you *can* aggregate-init a value and let `SAFE_MALLOC` move it
+onto the heap — **pure `_Safe`, no `_Unsafe` block**:
+
+```c
+typedef struct Entry { char *_Owned _Nullable key; char *_Owned _Nullable val; } Entry;
+_Safe Entry *_Owned _Nullable entry_new(const char *_Borrow k, const char *_Borrow v) {
+    Entry e = { .key = xstrdup(k), .val = xstrdup(v) };  /* aggregate-init in _Safe */
+    return SAFE_MALLOC(Entry, e);                         /* move onto heap — no _Unsafe */
+}
+```
+
+Verified: construct + owned-field teardown (free each field, then `SAFE_FREE`) compiles clean in
+pure `_Safe` and dual-builds; the leaky variant is caught under `-x bsc`. Fall back to raw
+`malloc`+`__take_from_raw` (in `_Unsafe`) only for **variable-size / array** allocations
+(`safe_malloc_array<T>(n, init)` is the BSC array analog).
 
 ## Re-declare external paired resources (no wrapper needed)
 
@@ -88,14 +129,12 @@ Now `fopen` → must reach exactly one `fclose` on every path (else compile-time
 `f` is unusable after `fclose` (compile-time use-after-free). Under the shim these erase to
 the standard prototypes. (`free`, `SSL_CTX_new`/`SSL_CTX_free`, etc. follow the same shape.)
 
-> **Exception — `void*`-returning allocators (`malloc`/`calloc`/`realloc`) stay raw.**
-> Re-declaring `malloc` as `void *_Owned` backfires: casting that `void *_Owned` to a typed
-> `T *_Owned` is *forbidden in the safe zone* (verified: `conversion ... is forbidden in the
-> safe zone`). Keep `malloc` raw and bridge with `__take_from_raw` — which, like raw casts
-> and `__move_to_raw`, is **not `_Safe`** and must sit in a minimal `_Unsafe { }` block in the
-> BSC build (the shim erases it under C, so dual-build still holds). Re-declaration with
-> `_Owned` is only for APIs that return the **final typed** pointer (`fopen`→`FILE*`,
-> `strdup`→`char*`).
+> **Don't re-declare `void*`-returning allocators (`malloc`/`calloc`/`realloc`) as `_Owned`** —
+> casting `void *_Owned` to a typed `T *_Owned` is *forbidden in the safe zone* (verified).
+> For allocation, use the `SAFE_MALLOC`/`SAFE_CALLOC` macros above (preferred, `_Safe`); only if
+> you must call raw `malloc` (variable-size/array) keep it raw and bridge with `__take_from_raw`
+> inside a minimal `_Unsafe { }` block. Re-declaration with `_Owned` is for APIs returning a
+> **final typed** pointer (`fopen`→`FILE*`, `strdup`→`char*`).
 
 > **`int` file descriptors are the exception:** `_Owned` is a *pointer* qualifier — an `int`
 > fd (`open`/`accept` → `close`) cannot carry it. Re-declaration can't help; either leave the
@@ -137,13 +176,13 @@ per `bsc-design`, accepting the dual-build loss for those files).
 |---|---|
 | Reaching for full `c-to-bsc` (member fns, libcbs, `_Owned struct`+destructor) | Over-disrupts and **kills the C build** per file. Stay annotation-only unless you've decided to drop dual-build for that file. |
 | Expecting annotated C to compile as C without the shim | Bare `_Owned` is a parse error under `-xc`. The shim header is mandatory for the C build. |
-| Using `safe_malloc<T>` | Generic syntax — breaks dual-build. Use raw `malloc` + `__take_from_raw` (shimmed to identity). |
+| Writing `safe_malloc<T>` directly in the source | The `<T>` generic syntax breaks the C build. Use the `SAFE_MALLOC(T, …)` / `SAFE_CALLOC(T)` macros (BSC → `safe_malloc<T>`, C → `malloc`/`calloc`). |
 | Trusting "it compiled, so it's safe" | The return-borrow codegen UAF (upstream IJC66K) passes the checker but is UAF. **Always run valgrind.** |
 | Dropping the `#ifndef __bishengc` guard (or force-defining the qualifiers under BSC) | Then `_Owned` etc. erase under BSC too and you lose all checking. The guard is what keeps the shim inert under `-x bsc`. |
 | Annotating a param `_Owned` when the function only reads | `_Owned` = consume (caller's var dies). Reads take `const T *_Borrow`. (See `c-to-bsc` Step 2.5.) |
 | Re-declaring `malloc`/`calloc`/`realloc` (`void*`-returning) as `void *_Owned` | The cast to `T *_Owned` is forbidden in the safe zone. Keep them raw + `__take_from_raw`. Only re-declare APIs that return the **final typed** pointer. |
 | Writing `malloc` / `__take_from_raw` / `__move_to_raw` / a raw cast on a `_Safe` line | None of these are `_Safe`. Wrap the minimal line in `_Unsafe { }` (shim erases it under C → dual-build holds). |
-| Building a heap `_Owned`-field struct by field-by-field assignment | Forbidden in the safe zone ("assign to part of _Owned value"). Construct through a raw pointer inside a small `_Unsafe` block, **or** return a value-type aggregate `T` (`{ .f = … }` aggregate-init) where the API can be by-value. This is the one structural exception to "annotation-only". |
+| Building a heap `_Owned`-field struct by field-by-field assignment | Forbidden in the safe zone ("assign to part of _Owned value"). Aggregate-init a value `T e = { .f = … };` then `SAFE_MALLOC(T, e)` to move it onto the heap — **pure `_Safe`, no `_Unsafe`** (verified). Raw construction in `_Unsafe` is only a fallback. |
 
 ## Real-world impact (verified with the project toolchain)
 
@@ -155,7 +194,7 @@ per `bsc-design`, accepting the dual-build loss for those files).
 - A member function and a `safe_malloc<int>` generic each fail under `-xc` — confirming the
   forbidden-list above is what to avoid to keep the C build.
 - A subagent application test (hardening a `malloc`+`fopen` module end-to-end) confirmed the
-  annotation-only + dual-build flow works (BSC clean, plain C clean, valgrind 0 errors) and
-  surfaced the `void*`-allocator and owned-field-heap-construction gotchas now in Common
-  mistakes — i.e. annotation-only needs **one** small `_Unsafe` construction block for any
-  heap struct with `_Owned` fields.
+  annotation-only + dual-build flow works (BSC clean, plain C clean, valgrind 0 errors). It
+  first looked like owned-field heap structs needed an `_Unsafe` construction block — but the
+  `SAFE_MALLOC(T, aggregate)` macro **removes even that** (verified): with it, the regime is
+  fully `_Unsafe`-free for fixed-type allocation and owned-field construction.

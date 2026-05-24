@@ -44,29 +44,66 @@ description: "用于给存量 C 代码库做 BiSheng C 内存安全加固、同�
 ## 唯一的一处基建:shim 头文件
 
 BSC 编译器预定义了 `__bishengc`(已验证:`#define __bishengc 1`;普通 clang **不**定义它)。
-用它来守卫 shim,这样**一句无条件的 `#include`** 在两种构建里都正确 —— 在 BSC 下惰性
-(限定符保持为真正的关键字),在纯 C 下擦除。无需逐构建的 `-include` 折腾;既不会泄漏进 BSC
-构建,也不会在 C 构建里忘掉。`nullptr` 映射成 `((void*)0)`(自包含 —— 不依赖 `<stddef.h>`/`NULL`)。
+据此分支,使**一句无条件的 `#include`** 在两种构建里都正确:BSC 下拉入 `bishengc_safety.hbs`、
+限定符保持为真正的关键字;纯 C 下拉入 `<stdlib.h>`、擦除限定符、把分配宏映射到裸
+`malloc`/`calloc`/`free`。一个头、无逐构建 `-include`、既不会泄漏进 BSC 构建也不会在 C 构建里
+忘掉。`nullptr` → `((void*)0)`(不依赖 `<stddef.h>`/`NULL`)。
 
 ```c
-/* bsc_shim.h —— 到处 #include 它;仅在非 BSC 编译器下自动生效 */
-#ifndef __bishengc
-#define _Safe
-#define _Unsafe
-#define _Owned
-#define _Borrow
-#define _Nonnull
-#define _Nullable
-#define _Const
-#define _Mut
-#define nullptr ((void*)0)
-#define __take_from_raw(p) (p)
-#define __move_to_raw(p)   (p)
+/* bsc_shim.h —— 到处 #include 它;按编译器自动生效 */
+#ifdef __bishengc
+#  include "bishengc_safety.hbs"                  /* safe_malloc / safe_free —— 仅 BSC */
+#  define SAFE_MALLOC(T, init) safe_malloc<T>(init)    /* 分配+初始化 -> T *_Owned(_Safe)*/
+#  define SAFE_CALLOC(T)       safe_malloc<T>((T){0})  /* 清零的 T(本 libcbs 无 safe_calloc)*/
+#  define SAFE_FREE(p)         safe_free((void *_Owned)(p))
+#else
+#  include <stdlib.h>                             /* malloc / free —— 仅 C */
+#  define _Safe
+#  define _Unsafe
+#  define _Owned
+#  define _Borrow
+#  define _Nonnull
+#  define _Nullable
+#  define _Const
+#  define _Mut
+#  define nullptr ((void*)0)
+#  define __take_from_raw(p) (p)
+#  define __move_to_raw(p)   (p)
+#  define SAFE_MALLOC(T, init) ({ T *_s = (T *)malloc(sizeof(T)); if (_s) *_s = (init); _s; })
+#  define SAFE_CALLOC(T)       ((T *)calloc(1, sizeof(T)))
+#  define SAFE_FREE(p)         free(p)
 #endif
 ```
 
-已验证:`#include` 该头后,在 `-x bsc` 下泄漏仍被抓到(shim 惰性),同一份源码在 `-xc` 下
-干净编过(shim 擦除),且无需任何 libc 头文件。
+两种编译器下均已验证:`-x bsc` 下泄漏仍被抓到(限定符生效),同一份源码 `-xc` 下干净编过
+(限定符擦除、分配宏退回 malloc/calloc/free)。C 侧 `SAFE_MALLOC` 用 GNU/clang 的语句表达式
+(`({ … })`)在单个表达式里完成分配+初始化 —— gcc 与 clang 都支持(本环境用的就是它们)。
+
+## 首选分配:`SAFE_MALLOC` / `SAFE_CALLOC` / `SAFE_FREE`
+
+BSC 下它们映射到 `safe_malloc<T>` / `safe_free` —— 都是 `_Safe`,所以**无需 `_Unsafe`、无需
+`__take_from_raw`**。固定类型分配优先用它们,而非裸 `malloc`+`__take_from_raw`:
+
+```c
+int  *_Owned p = SAFE_MALLOC(int, 42);   /* 分配+初始化 */
+Node *_Owned n = SAFE_CALLOC(Node);      /* 清零(本 libcbs 无 safe_calloc;宏用 safe_malloc<T>((T){0}))*/
+SAFE_FREE(p);                            /* 消费 —— 泄漏/UAF 仍受检 */
+```
+
+**这还顺带化解了"带 `_Owned` 字段堆结构"的难题。** 安全区里不能逐字段给 `_Owned` 字段赋值,
+但你**可以**先聚合初始化一个值,再让 `SAFE_MALLOC` 把它 move 到堆上 —— **纯 `_Safe`,无 `_Unsafe`**:
+
+```c
+typedef struct Entry { char *_Owned _Nullable key; char *_Owned _Nullable val; } Entry;
+_Safe Entry *_Owned _Nullable entry_new(const char *_Borrow k, const char *_Borrow v) {
+    Entry e = { .key = xstrdup(k), .val = xstrdup(v) };  /* 安全区聚合初始化 */
+    return SAFE_MALLOC(Entry, e);                         /* move 到堆 —— 无 _Unsafe */
+}
+```
+
+已验证:构造 + 拥有型字段拆卸(逐个 free 字段,再 `SAFE_FREE`)在纯 `_Safe` 下干净编过且双编译;
+漏释放的那版在 `-x bsc` 下被抓到。仅在**变长 / 数组**分配时才退回裸 `malloc`+`__take_from_raw`
+(放进 `_Unsafe`);BSC 的数组对应物是 `safe_malloc_array<T>(n, init)`。
 
 ## 重声明外部配对资源(无需 wrapper)
 
@@ -82,12 +119,11 @@ _Safe int                    fclose(FILE *_Owned stream);   /* consume == free(�
 之后不可用(编译期 use-after-free)。在 shim 下这些会擦除成标准原型。
 (`free`、`SSL_CTX_new`/`SSL_CTX_free` 等遵循同样的形态。)
 
-> **例外 —— `void*` 返回型分配器(`malloc`/`calloc`/`realloc`)保持裸指针。** 把 `malloc`
-> 重声明成 `void *_Owned` 会适得其反:把那个 `void *_Owned` 转成有类型的 `T *_Owned` 在安全区
-> 是*禁止*的(实测:`conversion ... is forbidden in the safe zone`)。让 `malloc` 保持裸指针,
-> 用 `__take_from_raw` 过桥 —— 它和裸指针强转、`__move_to_raw` 一样**不是 `_Safe`**,在 BSC
-> 构建里必须放进最小的 `_Unsafe { }` 块(C 下被 shim 擦除,双编译照旧成立)。用 `_Owned` 重声明
-> 只适用于返回**最终有类型**指针的 API(`fopen`→`FILE*`、`strdup`→`char*`)。
+> **别把 `void*` 返回型分配器(`malloc`/`calloc`/`realloc`)重声明成 `_Owned`** —— 把
+> `void *_Owned` 转成有类型的 `T *_Owned` 在安全区是*禁止*的(实测)。分配请优先用上面的
+> `SAFE_MALLOC`/`SAFE_CALLOC` 宏(`_Safe`);只有当你必须调裸 `malloc`(变长/数组)时,才让它
+> 保持裸指针并用 `__take_from_raw` 在最小 `_Unsafe { }` 块里过桥。用 `_Owned` 重声明只适用于
+> 返回**最终有类型**指针的 API(`fopen`→`FILE*`、`strdup`→`char*`)。
 
 > **`int` 文件描述符是例外:** `_Owned` 是*指针*限定符 —— 一个 `int` fd(`open`/`accept` →
 > `close`)带不了它。重声明帮不上忙;要么让该 fd 不被跟踪,要么用
@@ -125,13 +161,13 @@ _Safe int                    fclose(FILE *_Owned stream);   /* consume == free(�
 |---|---|
 | 直接上完整 `c-to-bsc`(成员函数、libcbs、`_Owned struct`+析构) | 扰动过大且**逐文件杀死 C 构建**。除非已决定放弃该文件的双编译,否则坚持只标注。 |
 | 以为标注后的 C 不用 shim 也能当 C 编 | 裸 `_Owned` 在 `-xc` 下是 parse 错误。shim 头对 C 构建是必需的。 |
-| 用 `safe_malloc<T>` | 泛型语法 —— 破坏双编译。改用裸 `malloc` + `__take_from_raw`(被 shim 成恒等)。 |
+| 在源码里直接写 `safe_malloc<T>` | `<T>` 泛型语法破坏 C 构建。改用 `SAFE_MALLOC(T, …)` / `SAFE_CALLOC(T)` 宏(BSC → `safe_malloc<T>`,C → `malloc`/`calloc`)。 |
 | 相信"它编过了,所以安全" | return-borrow 的 codegen UAF(上游 IJC66K)能过检查器但确是 UAF。**务必跑 valgrind。** |
 | 去掉 `#ifndef __bishengc` 守卫(或在 BSC 下强行定义这些限定符) | 那么 `_Owned` 等在 BSC 下也被擦除,你会丢掉全部检查。守卫正是让 shim 在 `-x bsc` 下保持惰性的东西。 |
 | 函数只读却把参数标成 `_Owned` | `_Owned` = 消费(调用方的变量随之失效)。只读应取 `const T *_Borrow`。(见 `c-to-bsc` Step 2.5。) |
 | 把 `malloc`/`calloc`/`realloc`(返回 `void*`)重声明成 `void *_Owned` | 转成 `T *_Owned` 在安全区被禁止。让它们保持裸指针 + `__take_from_raw`(放进 `_Unsafe`)。只重声明返回**最终有类型**指针的 API。 |
 | 把 `malloc` / `__take_from_raw` / `__move_to_raw` / 裸指针强转写在 `_Safe` 行上 | 这些都不是 `_Safe`。把那一行用 `_Unsafe { }` 包住(C 下被 shim 擦除 → 双编译成立)。 |
-| 用逐字段赋值去构造带 `_Owned` 字段的堆结构 | 安全区禁止("assign to part of _Owned value")。要么在一小段 `_Unsafe` 块里通过裸指针构造,要么在 API 允许按值时返回值类型聚合 `T`(`{ .f = … }` 聚合初始化)。这是"仅标注"的唯一结构性例外。 |
+| 用逐字段赋值去构造带 `_Owned` 字段的堆结构 | 安全区禁止("assign to part of _Owned value")。先聚合初始化一个值 `T e = { .f = … };` 再用 `SAFE_MALLOC(T, e)` move 到堆上 —— **纯 `_Safe`,无 `_Unsafe`**(已验证)。裸指针构造(放 `_Unsafe`)只是退路。 |
 
 ## 实测影响(用项目工具链验证)
 
@@ -143,6 +179,6 @@ _Safe int                    fclose(FILE *_Owned stream);   /* consume == free(�
 - 一个成员函数和一个 `safe_malloc<int>` 泛型在 `-xc` 下各自失败 —— 印证上面的禁止清单
   正是为保住 C 构建而要避开的东西。
 - 一次 subagent 应用测试(端到端加固一个 `malloc`+`fopen` 模块)确认了仅标注 + 双编译流程可行
-  (BSC 干净、纯 C 干净、valgrind 0 错误),并暴露出现在常见错误里的 `void*` 分配器与
-  带 `_Owned` 字段堆结构构造这两个坑 —— 即仅标注仍需**一**小段 `_Unsafe` 构造块来构造任何
-  带 `_Owned` 字段的堆结构。
+  (BSC 干净、纯 C 干净、valgrind 0 错误)。它起初看似"带 `_Owned` 字段的堆结构需要一小段
+  `_Unsafe` 构造块",但 `SAFE_MALLOC(T, aggregate)` 宏**连这一点也消除了**(已验证):有了它,
+  该 regime 在固定类型分配与拥有型字段构造上可做到完全 `_Unsafe`-free。
