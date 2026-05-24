@@ -30,7 +30,7 @@ _Safe void runtime_handle_conn(struct ConnJob job, void* _Nonnull ctx_raw) {
     // For SSL connections, do the TLS handshake now (worker owns the SSLConn).
     SSLConn *_Owned _Nullable sconn = nullptr;
     if (job.is_ssl && _Unsafe(ctx->ssl_ctx)) {
-        const SSLCtx* _Borrow bctx = _Unsafe(&_Const *((SSLCtx*)ctx->ssl_ctx));
+        const SSLCtx* _Borrow bctx = _Unsafe(&_Const *((SSLCtx* _Nonnull)ctx->ssl_ctx));
         sconn = net_ssl_accept(bctx, job.fd);
     }
     if (job.is_ssl && !sconn) { net_close(job.fd); return; }
