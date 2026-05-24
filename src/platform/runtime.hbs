@@ -4,8 +4,12 @@
 #include "../../include/router.hbs"
 
 // Read-only shared context handed to worker threads (raw pointers; the pointees
-// live for the whole server run via __move_to_raw).
-struct ServerCtx { const Config* _Nonnull config; const Router* _Nonnull router; };
+// live for the whole server run via __move_to_raw). ssl_ctx is NULL when SSL is disabled.
+struct ServerCtx {
+    const Config* _Nonnull config;
+    const Router* _Nonnull router;
+    void* _Nullable ssl_ctx;   // SSLCtx*
+};
 
 // Take ownership of cfg/router, bind, spawn the pool, run the accept loop forever.
 // Returns -1 on bind/pool failure.

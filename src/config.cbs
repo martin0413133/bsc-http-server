@@ -4,7 +4,10 @@
 _Safe Config Config::default_config(void) {
     String dr = String::new();
     str_append_cstr(&_Mut dr, "www");
-    Config c = { .port = 8080, .threads = 4, .document_root = dr };
+    String sc = String::new();
+    String sk = String::new();
+    Config c = { .port = 8080, .threads = 4, .document_root = dr,
+                 .ssl_port = 0, .ssl_cert = sc, .ssl_key = sk };
     return c;
 }
 
@@ -30,6 +33,9 @@ _Safe Config Config::parse(const String* _Borrow text) {
     int threads = 4;
     String dr = String::new();
     str_append_cstr(&_Mut dr, "www");
+    int ssl_port = 0;
+    String ssl_cert = String::new();
+    String ssl_key = String::new();
 
     size_t i = 0;
     while (at_or_nul(text, i) != '\0') {
@@ -53,12 +59,16 @@ _Safe Config Config::parse(const String* _Borrow text) {
         if (str_eq_cstr(&_Const key, "port")) { port = parse_int(&_Const val); }
         else if (str_eq_cstr(&_Const key, "threads")) { threads = parse_int(&_Const val); }
         else if (str_eq_cstr(&_Const key, "document_root")) { safe_swap(&_Mut dr, &_Mut val); }
+        else if (str_eq_cstr(&_Const key, "ssl_port")) { ssl_port = parse_int(&_Const val); }
+        else if (str_eq_cstr(&_Const key, "ssl_cert")) { safe_swap(&_Mut ssl_cert, &_Mut val); }
+        else if (str_eq_cstr(&_Const key, "ssl_key")) { safe_swap(&_Mut ssl_key, &_Mut val); }
     }
 
     // Reject out-of-range values (parse_int has no overflow guard); fall back to defaults.
     if (port < 1 || port > 65535) { port = 8080; }
     if (threads < 1) { threads = 1; }
 
-    Config c = { .port = port, .threads = threads, .document_root = dr };
+    Config c = { .port = port, .threads = threads, .document_root = dr,
+                 .ssl_port = ssl_port, .ssl_cert = ssl_cert, .ssl_key = ssl_key };
     return c;
 }

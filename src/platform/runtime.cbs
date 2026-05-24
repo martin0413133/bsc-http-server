@@ -7,9 +7,11 @@
 #include "../../include/http_response.hbs"
 #include "bishengc_safety.hbs"
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/select.h>
 
 #define RT_REQ_BUF 8200
 
@@ -19,23 +21,42 @@ static void rt_on_signal(int sig) { (void)sig; g_shutdown = 1; }
 
 // Worker callback (matches ConnHandler). _Safe so the _Owned locals (reqbuf/resp/wire)
 // are RAII-managed; only the void*/raw bridge is _Unsafe.
-_Safe void runtime_handle_conn(int fd, void* _Nonnull ctx_raw) {
-    String reqbuf = String::new();
-    if (!net_recv_string(fd, &_Mut reqbuf)) {
-        net_close(fd);
-        return;
-    }
-    char rawc[RT_REQ_BUF] = {0};
-    str_to_cbuf(&_Const reqbuf, rawc, RT_REQ_BUF);
-
+_Safe void runtime_handle_conn(struct ConnJob job, void* _Nonnull ctx_raw) {
     // Bridge raw shared context -> borrows for the business core.
     struct ServerCtx* ctx = _Unsafe((struct ServerCtx*)ctx_raw);
     const Config* _Borrow cfg = _Unsafe(&_Const *(ctx->config));
     const Router* _Borrow rt  = _Unsafe(&_Const *(ctx->router));
 
+    // For SSL connections, do the TLS handshake now (worker owns the SSLConn).
+    SSLConn *_Owned _Nullable sconn = nullptr;
+    if (job.is_ssl && _Unsafe(ctx->ssl_ctx)) {
+        const SSLCtx* _Borrow bctx = _Unsafe(&_Const *((SSLCtx*)ctx->ssl_ctx));
+        sconn = net_ssl_accept(bctx, job.fd);
+    }
+    if (job.is_ssl && !sconn) { net_close(job.fd); return; }
+
+    String reqbuf = String::new();
+    _Bool ok;
+    if (sconn) {
+        ok = net_ssl_recv_string(&_Const *sconn, &_Mut reqbuf);
+    } else {
+        ok = net_recv_string(job.fd, &_Mut reqbuf);
+    }
+    if (!ok) {
+        if (sconn) { net_ssl_conn_free(sconn); }
+        else { net_close(job.fd); }
+        return;
+    }
+    char rawc[RT_REQ_BUF] = {0};
+    str_to_cbuf(&_Const reqbuf, rawc, RT_REQ_BUF);
+
     Response resp = handle_request(cfg, rt, rawc);
     String wire = resp.to_string();
-    net_send_string(fd, &_Const wire);
+    if (sconn) {
+        net_ssl_send_string(&_Const *sconn, &_Const wire);
+    } else {
+        net_send_string(job.fd, &_Const wire);
+    }
 
     // access log: "METHOD PATH" from the request line
     char method[16] = {0};
@@ -48,53 +69,117 @@ _Safe void runtime_handle_conn(int fd, void* _Nonnull ctx_raw) {
     while (rawc[i] != '\0' && rawc[i] != ' ' && rawc[i] != '\r' && rawc[i] != '\n' && k < 255) { path[k] = rawc[i]; k++; i++; }
     log_request(method, path, resp.status);
 
-    net_close(fd);
+    if (sconn) { net_ssl_conn_free(sconn); }
+    else { net_close(job.fd); }
 }
 
 _Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
     int port = cfg->port;
     int threads = cfg->threads;
+
+    // SSL setup (_Safe context — net_ssl_ctx_new is _Safe and returns _Owned).
+    SSLCtx *_Owned _Nullable ssl_ctx = nullptr;
+    int ssl_port = cfg->ssl_port;
+    if (ssl_port > 0 && ssl_port <= 65535
+        && cfg->ssl_cert.length() > 0 && cfg->ssl_key.length() > 0) {
+        char cert[256] = {0};
+        char key[256] = {0};
+        {
+            size_t nc = cfg->ssl_cert.length();
+            if (nc > 255) { nc = 255; }
+            for (size_t ii = 0; ii < nc; ii++) { cert[ii] = cfg->ssl_cert.at(ii); }
+            size_t nk = cfg->ssl_key.length();
+            if (nk > 255) { nk = 255; }
+            for (size_t ii = 0; ii < nk; ii++) { key[ii] = cfg->ssl_key.at(ii); }
+        }
+        ssl_ctx = net_ssl_ctx_new(cert, key);
+        if (!ssl_ctx) {
+            _Unsafe { fprintf(stderr, "cc_httpd: SSL init failed (cert=%s key=%s), running HTTP only\n",
+                              cert, key); }
+            ssl_port = 0;
+        }
+    } else {
+        ssl_port = 0;
+    }
+
     _Unsafe {
-        // A client that drops the connection mid-response makes send() raise SIGPIPE,
-        // whose default action kills the process. Ignore it so send() returns EPIPE
-        // (handled by net_send_string) instead of taking the whole server down.
         signal(SIGPIPE, SIG_IGN);
 
-        // SIGINT/SIGTERM -> graceful shutdown. No SA_RESTART, so a signal makes the
-        // blocked accept() return EINTR and the loop can observe g_shutdown.
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
         sa.sa_handler = rt_on_signal;
         sigaction(SIGINT, &sa, NULL);
         sigaction(SIGTERM, &sa, NULL);
 
-        // Move both onto raw pointers shared (read-only) with worker threads.
+        // Move ownership to raw pointers shared (read-only) with worker threads.
         // Intentional process-lifetime allocation — reclaimed by the OS at exit.
         static struct ServerCtx ctx;
         ctx.config = (const Config* _Nonnull)__move_to_raw(cfg);
         ctx.router = (const Router* _Nonnull)__move_to_raw(router);
-
-        int listen_fd = net_listen(port, 128);
-        if (listen_fd < 0) { return -1; }
+        ctx.ssl_ctx = ssl_ctx ? (void* _Nullable)__move_to_raw(ssl_ctx) : (void* _Nullable)0;
 
         static struct ThreadPool pool;
         if (thread_pool_start(&pool, threads, runtime_handle_conn, &ctx) != 0) { return -1; }
 
-        fprintf(stderr, "cc_httpd listening on port %d (threads=%d)\n", port, threads);
+        int listen_fd = net_listen(port, 128);
+        if (listen_fd < 0) { return -1; }
+
+        int ssl_listen_fd = -1;
+        if (ssl_port > 0) {
+            ssl_listen_fd = net_listen(ssl_port, 128);
+            if (ssl_listen_fd < 0) {
+                fprintf(stderr, "cc_httpd: SSL listen on port %d failed, running HTTP only\n", ssl_port);
+            }
+        }
+
+        if (ssl_listen_fd >= 0) {
+            fprintf(stderr, "cc_httpd listening on port %d (HTTP) + port %d (HTTPS) (threads=%d)\n",
+                    port, ssl_port, threads);
+        } else {
+            fprintf(stderr, "cc_httpd listening on port %d (threads=%d)\n", port, threads);
+        }
+
         while (!g_shutdown) {
-            int client = net_accept(listen_fd);
-            if (client < 0) {
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(listen_fd, &rfds);
+            int maxfd = listen_fd;
+            if (ssl_listen_fd >= 0) {
+                FD_SET(ssl_listen_fd, &rfds);
+                if (ssl_listen_fd > maxfd) { maxfd = ssl_listen_fd; }
+            }
+
+            struct timeval tv;
+            tv.tv_sec = 1;
+            tv.tv_usec = 0;
+            int sr = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+            if (sr < 0) {
                 if (g_shutdown) { break; }
-                usleep(1000);   // transient accept error (e.g. EMFILE): back off, don't hot-spin
                 continue;
             }
-            thread_pool_submit(&pool, client);
+            if (sr == 0) { continue; }
+
+            if (FD_ISSET(listen_fd, &rfds)) {
+                int client = net_accept(listen_fd);
+                if (client >= 0) {
+                    struct ConnJob job = { .fd = client, .is_ssl = 0 };
+                    thread_pool_submit(&pool, job);
+                }
+            }
+            if (ssl_listen_fd >= 0 && FD_ISSET(ssl_listen_fd, &rfds)) {
+                int client = net_accept(ssl_listen_fd);
+                if (client >= 0) {
+                    struct ConnJob job = { .fd = client, .is_ssl = 1 };
+                    thread_pool_submit(&pool, job);
+                }
+            }
         }
 
         // Drain in-flight requests, stop workers, release the listen socket.
         fprintf(stderr, "cc_httpd shutting down...\n");
         thread_pool_shutdown(&pool);
         net_close(listen_fd);
+        if (ssl_listen_fd >= 0) { net_close(ssl_listen_fd); }
     }
     return 0;
 }

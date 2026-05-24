@@ -1,7 +1,7 @@
 #include "thread_pool.hbs"
 #include <unistd.h>
 
-// C-ABI worker (unsafe context by default). Pulls fds and dispatches to the handler.
+// C-ABI worker (unsafe context by default). Pulls jobs and dispatches to the handler.
 static void* tp_worker(void* arg) {
     struct ThreadPool* tp = (struct ThreadPool*)arg;
     for (;;) {
@@ -13,11 +13,11 @@ static void* tp_worker(void* arg) {
             pthread_mutex_unlock(&tp->mtx);
             break;
         }
-        int fd = tp->queue[tp->head];
+        struct ConnJob job = tp->queue[tp->head];
         tp->head = (tp->head + 1) % TP_QUEUE_CAP;
         tp->count--;
         pthread_mutex_unlock(&tp->mtx);
-        tp->handler(fd, tp->ctx);
+        tp->handler(job, tp->ctx);
     }
     return NULL;
 }
@@ -42,16 +42,15 @@ _Safe int thread_pool_start(struct ThreadPool* _Nonnull tp, int n_workers, ConnH
     }
 }
 
-_Safe void thread_pool_submit(struct ThreadPool* _Nonnull tp, int client_fd) {
+_Safe void thread_pool_submit(struct ThreadPool* _Nonnull tp, struct ConnJob job) {
     _Unsafe {
         pthread_mutex_lock(&tp->mtx);
         if (tp->count == TP_QUEUE_CAP) {
-            // queue full: drop the connection rather than block the accept loop
             pthread_mutex_unlock(&tp->mtx);
-            close(client_fd);
+            close(job.fd);
             return;
         }
-        tp->queue[tp->tail] = client_fd;
+        tp->queue[tp->tail] = job;
         tp->tail = (tp->tail + 1) % TP_QUEUE_CAP;
         tp->count++;
         pthread_cond_signal(&tp->not_empty);

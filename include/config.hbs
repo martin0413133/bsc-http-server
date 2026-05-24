@@ -7,6 +7,9 @@ _Public:
     int port;
     int threads;
     String document_root;
+    int ssl_port;
+    String ssl_cert;
+    String ssl_key;
 };
 
 _Safe Config Config::default_config(void);

@@ -1,6 +1,6 @@
-CC    := /home/zly/bsc/llvm-project/build/bin/clang
+CC    := /home/zly/bsc/llvm-project/install/bin/clang
 INC   := -I/home/zly/bsc/llvm-project/install/include/libcbs
-LIB   := -L/home/zly/bsc/llvm-project/install/lib -lstdcbs -lpthread
+LIB   := -L/home/zly/bsc/llvm-project/install/lib -lstdcbs -lpthread -lssl -lcrypto
 FLAGS := -Wall -Wextra -Wno-nullability-completeness -g
 BINDIR := bin
 
