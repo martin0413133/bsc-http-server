@@ -38,7 +38,7 @@ _Safe void runtime_handle_conn(struct ConnJob job, void* _Nonnull ctx_raw) {
     String reqbuf = String::new();
     _Bool ok;
     if (sconn) {
-        ok = net_ssl_recv_string(&_Const *sconn, &_Mut reqbuf);
+        ok = net_ssl_recv_string(&_Mut *sconn, &_Mut reqbuf);
     } else {
         ok = net_recv_string(job.fd, &_Mut reqbuf);
     }
@@ -53,7 +53,7 @@ _Safe void runtime_handle_conn(struct ConnJob job, void* _Nonnull ctx_raw) {
     Response resp = handle_request(cfg, rt, rawc);
     String wire = resp.to_string();
     if (sconn) {
-        net_ssl_send_string(&_Const *sconn, &_Const wire);
+        net_ssl_send_string(&_Mut *sconn, &_Const wire);
     } else {
         net_send_string(job.fd, &_Const wire);
     }

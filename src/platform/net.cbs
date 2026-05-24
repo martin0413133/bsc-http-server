@@ -9,9 +9,29 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+// --- _Safe declarations for external C functions ---
+_Safe const SSL_METHOD* TLS_server_method(void);
+// _Owned return: caller acquires ownership of the new object.
+_Safe SSL_CTX *_Owned SSL_CTX_new(const SSL_METHOD* method);
+// _Borrow params: these functions read/configure but don't consume the pointer.
+_Safe int      SSL_CTX_use_certificate_file(SSL_CTX* _Borrow ctx, const char* _Nonnull file, int type);
+_Safe int      SSL_CTX_use_PrivateKey_file(SSL_CTX* _Borrow ctx, const char* _Nonnull file, int type);
+_Safe int      SSL_CTX_check_private_key(const SSL_CTX* _Borrow ctx);
+_Safe SSL     *_Owned SSL_new(SSL_CTX* _Borrow ctx);
+_Safe int      SSL_set_fd(SSL* _Borrow ssl, int fd);
+_Safe int      SSL_accept(SSL* _Borrow ssl);
+_Safe int      SSL_read(SSL* _Borrow ssl, void* buf, int num);
+_Safe int      SSL_write(SSL* _Borrow ssl, const void* buf, int num);
+_Safe int      SSL_shutdown(SSL* _Borrow ssl);
+// _Owned param: these consume and free the pointer.
+_Safe void     SSL_CTX_free(SSL_CTX *_Owned ctx);
+_Safe void     SSL_free(SSL *_Owned ssl);
+// Simple fd-based functions:
+_Safe int      close(int fd);
+
 #define NET_RECV_BUF 8192
 #define NET_SEND_CHUNK 4096
-#define NET_TIMEOUT_SEC 10   // per-connection recv/send timeout — bounds slow/idle clients
+#define NET_TIMEOUT_SEC 10
 
 _Safe int net_listen(int port, int backlog) {
     _Unsafe {
@@ -73,60 +93,59 @@ _Safe _Bool net_send_string(int fd, const String* _Borrow data) {
     return 1;
 }
 
-_Safe void net_close(int fd) { _Unsafe { close(fd); } }
+_Safe void net_close(int fd) { close(fd); }
 
 // --- SSL support ---
 
 _Safe SSLCtx *_Owned _Nullable net_ssl_ctx_new(const char* _Nonnull cert_file,
                                                 const char* _Nonnull key_file) {
-    void* raw;  // SSL_CTX*, filled in _Unsafe
-    _Unsafe { raw = (void*)SSL_CTX_new(TLS_server_method()); }
+    SSL_CTX *_Owned raw = SSL_CTX_new(TLS_server_method());
     if (!raw) { return nullptr; }
 
-    _Unsafe {
-        SSL_CTX_set_mode((SSL_CTX*)raw, SSL_MODE_AUTO_RETRY);
-        if (SSL_CTX_use_certificate_file((SSL_CTX*)raw, cert_file, SSL_FILETYPE_PEM) <= 0
-            || SSL_CTX_use_PrivateKey_file((SSL_CTX*)raw, key_file, SSL_FILETYPE_PEM) <= 0
-            || SSL_CTX_check_private_key((SSL_CTX*)raw) <= 0) {
-            SSL_CTX_free((SSL_CTX*)raw);
-            return nullptr;
-        }
+    // SSL_CTX_set_mode is a macro — still needs _Unsafe.
+    _Unsafe { SSL_CTX_set_mode((SSL_CTX *)&_Mut *raw, SSL_MODE_AUTO_RETRY); }
+    // _Borrow params: _Owned → _Borrow is safe, no _Unsafe needed.
+    if (SSL_CTX_use_certificate_file(&_Mut *raw, cert_file, SSL_FILETYPE_PEM) <= 0
+        || SSL_CTX_use_PrivateKey_file(&_Mut *raw, key_file, SSL_FILETYPE_PEM) <= 0
+        || SSL_CTX_check_private_key(&_Const *raw) <= 0) {
+        SSL_CTX_free(raw);   // consumes _Owned
+        return nullptr;
     }
 
-    SSLCtx val = { .raw_ctx = (void* _Nonnull)raw };
+    SSLCtx val = { .raw_ctx = raw };   // _Owned moved into struct field
     SSLCtx *_Owned p = safe_malloc(val);
     return p;
 }
 
 _Safe SSLConn *_Owned _Nullable net_ssl_accept(const SSLCtx* _Borrow ctx, int fd) {
-    void* raw_ssl;  // SSL*, filled in _Unsafe
-    _Unsafe { raw_ssl = (void*)SSL_new((SSL_CTX*)ctx->raw_ctx); }
+    // Prepare borrow in _Unsafe, then call in _Safe to preserve _Owned return.
+    SSL_CTX* _Borrow b_ctx;
+    _Unsafe { b_ctx = &_Mut *ctx->raw_ctx; }
+    SSL *_Owned raw_ssl = SSL_new(b_ctx);
     if (!raw_ssl) { return nullptr; }
 
-    _Unsafe {
-        SSL_set_fd((SSL*)raw_ssl, fd);
-        if (SSL_accept((SSL*)raw_ssl) <= 0) {
-            SSL_free((SSL*)raw_ssl);
-            return nullptr;
-        }
+    SSL_set_fd(&_Mut *raw_ssl, fd);
+    if (SSL_accept(&_Mut *raw_ssl) <= 0) {
+        SSL_free(raw_ssl);   // consumes _Owned
+        return nullptr;
     }
 
-    SSLConn val = { .raw_ssl = (void* _Nonnull)raw_ssl, .fd = fd };
+    SSLConn val = { .raw_ssl = raw_ssl, .fd = fd };   // _Owned moved into struct field
     SSLConn *_Owned p = safe_malloc(val);
     return p;
 }
 
-_Safe _Bool net_ssl_recv_string(const SSLConn* _Borrow ssl, String* _Borrow out) {
+_Safe _Bool net_ssl_recv_string(SSLConn* _Borrow ssl, String* _Borrow out) {
     char buf[NET_RECV_BUF] = {0};
     int n;
-    _Unsafe { n = SSL_read((SSL*)ssl->raw_ssl, buf, NET_RECV_BUF - 1); }
+    _Unsafe { n = SSL_read(&_Mut *ssl->raw_ssl, buf, NET_RECV_BUF - 1); }
     if (n <= 0) { return 0; }
     size_t got = (size_t)n;
     for (size_t i = 0; i < got; i++) { out->push(buf[i]); }
     return 1;
 }
 
-_Safe _Bool net_ssl_send_string(const SSLConn* _Borrow ssl, const String* _Borrow data) {
+_Safe _Bool net_ssl_send_string(SSLConn* _Borrow ssl, const String* _Borrow data) {
     size_t len = data->length();
     size_t off = 0;
     while (off < len) {
@@ -134,8 +153,7 @@ _Safe _Bool net_ssl_send_string(const SSLConn* _Borrow ssl, const String* _Borro
         size_t m = 0;
         while (off < len && m < NET_SEND_CHUNK) { chunk[m] = data->at(off); m++; off++; }
         _Unsafe {
-            int sent = SSL_write((SSL*)ssl->raw_ssl, chunk, (int)m);
-            if (sent <= 0) { return 0; }
+            if (SSL_write(&_Mut *ssl->raw_ssl, chunk, (int)m) <= 0) { return 0; }
         }
     }
     return 1;
@@ -143,16 +161,16 @@ _Safe _Bool net_ssl_send_string(const SSLConn* _Borrow ssl, const String* _Borro
 
 _Safe void net_ssl_conn_free(SSLConn *_Owned _Nullable ssl) {
     if (!ssl) { return; }
-    _Unsafe {
-        SSL_shutdown((SSL*)ssl->raw_ssl);
-        SSL_free((SSL*)ssl->raw_ssl);
-        close(ssl->fd);
-    }
+    _Unsafe { SSL_shutdown(&_Mut *ssl->raw_ssl); }
+    SSL *_Owned raw = ssl->raw_ssl;   // move _Owned out of struct field
+    SSL_free(raw);                     // consumes _Owned
+    close(ssl->fd);
     safe_free((void *_Owned)ssl);
 }
 
 _Safe void net_ssl_ctx_free(SSLCtx *_Owned _Nullable ctx) {
     if (!ctx) { return; }
-    _Unsafe { SSL_CTX_free((SSL_CTX*)ctx->raw_ctx); }
+    SSL_CTX *_Owned raw = ctx->raw_ctx;   // move _Owned out of struct field
+    SSL_CTX_free(raw);                     // consumes _Owned
     safe_free((void *_Owned)ctx);
 }

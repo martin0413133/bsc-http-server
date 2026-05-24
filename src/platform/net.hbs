@@ -3,6 +3,10 @@
 #include <stddef.h>
 #include "string.hbs"
 
+// Forward-declare OpenSSL opaque types (incomplete, pointer-only).
+struct ssl_ctx_st;   // SSL_CTX
+struct ssl_st;       // SSL
+
 // Adapter: _Safe interface over POSIX sockets; _Unsafe only inside.
 _Safe int   net_listen(int port, int backlog);   // listen fd, or -1 on error
 _Safe int   net_accept(int listen_fd);            // client fd, or -1
@@ -10,9 +14,9 @@ _Safe _Bool net_recv_string(int fd, String* _Borrow out);   // read one request 
 _Safe _Bool net_send_string(int fd, const String* _Borrow data); // length-based send
 _Safe void  net_close(int fd);
 
-// Opaque SSL types wrapping OpenSSL C pointers.
-typedef struct SSLCtx  { void* _Nonnull raw_ctx; } SSLCtx;
-typedef struct SSLConn { void* _Nonnull raw_ssl; int fd; } SSLConn;
+// SSL wrappers — _Owned fields own the inner OpenSSL resource.
+typedef struct SSLCtx  { struct ssl_ctx_st *_Owned _Nonnull raw_ctx; } SSLCtx;
+typedef struct SSLConn { struct ssl_st     *_Owned _Nonnull raw_ssl; int fd; } SSLConn;
 
 // Create SSL context from cert/key file paths. Returns _Owned, NULL on failure.
 _Safe SSLCtx  *_Owned _Nullable net_ssl_ctx_new(const char* _Nonnull cert_file,
@@ -20,9 +24,9 @@ _Safe SSLCtx  *_Owned _Nullable net_ssl_ctx_new(const char* _Nonnull cert_file,
 // Accept TLS handshake on fd. Returns _Owned SSLConn, NULL on failure.
 _Safe SSLConn *_Owned _Nullable net_ssl_accept(const SSLCtx* _Borrow ctx, int fd);
 // Read from SSL connection into out. Returns 0 on error/EOF.
-_Safe _Bool net_ssl_recv_string(const SSLConn* _Borrow ssl, String* _Borrow out);
+_Safe _Bool net_ssl_recv_string(SSLConn* _Borrow ssl, String* _Borrow out);
 // Send data over SSL connection.
-_Safe _Bool net_ssl_send_string(const SSLConn* _Borrow ssl, const String* _Borrow data);
+_Safe _Bool net_ssl_send_string(SSLConn* _Borrow ssl, const String* _Borrow data);
 // Close SSL connection and free the SSLConn (takes ownership).
 _Safe void net_ssl_conn_free(SSLConn *_Owned _Nullable ssl);
 // Free the SSL context (takes ownership, call at shutdown).
