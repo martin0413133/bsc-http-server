@@ -82,6 +82,13 @@ _Safe int                    fclose(FILE *_Owned stream);   /* consume == free(�
 之后不可用(编译期 use-after-free)。在 shim 下这些会擦除成标准原型。
 (`free`、`SSL_CTX_new`/`SSL_CTX_free` 等遵循同样的形态。)
 
+> **例外 —— `void*` 返回型分配器(`malloc`/`calloc`/`realloc`)保持裸指针。** 把 `malloc`
+> 重声明成 `void *_Owned` 会适得其反:把那个 `void *_Owned` 转成有类型的 `T *_Owned` 在安全区
+> 是*禁止*的(实测:`conversion ... is forbidden in the safe zone`)。让 `malloc` 保持裸指针,
+> 用 `__take_from_raw` 过桥 —— 它和裸指针强转、`__move_to_raw` 一样**不是 `_Safe`**,在 BSC
+> 构建里必须放进最小的 `_Unsafe { }` 块(C 下被 shim 擦除,双编译照旧成立)。用 `_Owned` 重声明
+> 只适用于返回**最终有类型**指针的 API(`fopen`→`FILE*`、`strdup`→`char*`)。
+
 > **`int` 文件描述符是例外:** `_Owned` 是*指针*限定符 —— 一个 `int` fd(`open`/`accept` →
 > `close`)带不了它。重声明帮不上忙;要么让该 fd 不被跟踪,要么用
 > `_Owned struct Fd { int fd; ~Fd … }` 包起来 —— 但那个析构是 BSC 专属的,会**让该文件失去
@@ -122,6 +129,9 @@ _Safe int                    fclose(FILE *_Owned stream);   /* consume == free(�
 | 相信"它编过了,所以安全" | return-borrow 的 codegen UAF(上游 IJC66K)能过检查器但确是 UAF。**务必跑 valgrind。** |
 | 去掉 `#ifndef __bishengc` 守卫(或在 BSC 下强行定义这些限定符) | 那么 `_Owned` 等在 BSC 下也被擦除,你会丢掉全部检查。守卫正是让 shim 在 `-x bsc` 下保持惰性的东西。 |
 | 函数只读却把参数标成 `_Owned` | `_Owned` = 消费(调用方的变量随之失效)。只读应取 `const T *_Borrow`。(见 `c-to-bsc` Step 2.5。) |
+| 把 `malloc`/`calloc`/`realloc`(返回 `void*`)重声明成 `void *_Owned` | 转成 `T *_Owned` 在安全区被禁止。让它们保持裸指针 + `__take_from_raw`(放进 `_Unsafe`)。只重声明返回**最终有类型**指针的 API。 |
+| 把 `malloc` / `__take_from_raw` / `__move_to_raw` / 裸指针强转写在 `_Safe` 行上 | 这些都不是 `_Safe`。把那一行用 `_Unsafe { }` 包住(C 下被 shim 擦除 → 双编译成立)。 |
+| 用逐字段赋值去构造带 `_Owned` 字段的堆结构 | 安全区禁止("assign to part of _Owned value")。要么在一小段 `_Unsafe` 块里通过裸指针构造,要么在 API 允许按值时返回值类型聚合 `T`(`{ .f = … }` 聚合初始化)。这是"仅标注"的唯一结构性例外。 |
 
 ## 实测影响(用项目工具链验证)
 
@@ -132,3 +142,7 @@ _Safe int                    fclose(FILE *_Owned stream);   /* consume == free(�
   干净编过(双编译确认;同一份源码,单次 `#include`)。
 - 一个成员函数和一个 `safe_malloc<int>` 泛型在 `-xc` 下各自失败 —— 印证上面的禁止清单
   正是为保住 C 构建而要避开的东西。
+- 一次 subagent 应用测试(端到端加固一个 `malloc`+`fopen` 模块)确认了仅标注 + 双编译流程可行
+  (BSC 干净、纯 C 干净、valgrind 0 错误),并暴露出现在常见错误里的 `void*` 分配器与
+  带 `_Owned` 字段堆结构构造这两个坑 —— 即仅标注仍需**一**小段 `_Unsafe` 构造块来构造任何
+  带 `_Owned` 字段的堆结构。

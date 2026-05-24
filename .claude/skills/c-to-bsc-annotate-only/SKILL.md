@@ -88,6 +88,15 @@ Now `fopen` → must reach exactly one `fclose` on every path (else compile-time
 `f` is unusable after `fclose` (compile-time use-after-free). Under the shim these erase to
 the standard prototypes. (`free`, `SSL_CTX_new`/`SSL_CTX_free`, etc. follow the same shape.)
 
+> **Exception — `void*`-returning allocators (`malloc`/`calloc`/`realloc`) stay raw.**
+> Re-declaring `malloc` as `void *_Owned` backfires: casting that `void *_Owned` to a typed
+> `T *_Owned` is *forbidden in the safe zone* (verified: `conversion ... is forbidden in the
+> safe zone`). Keep `malloc` raw and bridge with `__take_from_raw` — which, like raw casts
+> and `__move_to_raw`, is **not `_Safe`** and must sit in a minimal `_Unsafe { }` block in the
+> BSC build (the shim erases it under C, so dual-build still holds). Re-declaration with
+> `_Owned` is only for APIs that return the **final typed** pointer (`fopen`→`FILE*`,
+> `strdup`→`char*`).
+
 > **`int` file descriptors are the exception:** `_Owned` is a *pointer* qualifier — an `int`
 > fd (`open`/`accept` → `close`) cannot carry it. Re-declaration can't help; either leave the
 > fd untracked, or wrap it in `_Owned struct Fd { int fd; ~Fd … }` — but that destructor is
@@ -132,6 +141,9 @@ per `bsc-design`, accepting the dual-build loss for those files).
 | Trusting "it compiled, so it's safe" | The return-borrow codegen UAF (upstream IJC66K) passes the checker but is UAF. **Always run valgrind.** |
 | Dropping the `#ifndef __bishengc` guard (or force-defining the qualifiers under BSC) | Then `_Owned` etc. erase under BSC too and you lose all checking. The guard is what keeps the shim inert under `-x bsc`. |
 | Annotating a param `_Owned` when the function only reads | `_Owned` = consume (caller's var dies). Reads take `const T *_Borrow`. (See `c-to-bsc` Step 2.5.) |
+| Re-declaring `malloc`/`calloc`/`realloc` (`void*`-returning) as `void *_Owned` | The cast to `T *_Owned` is forbidden in the safe zone. Keep them raw + `__take_from_raw`. Only re-declare APIs that return the **final typed** pointer. |
+| Writing `malloc` / `__take_from_raw` / `__move_to_raw` / a raw cast on a `_Safe` line | None of these are `_Safe`. Wrap the minimal line in `_Unsafe { }` (shim erases it under C → dual-build holds). |
+| Building a heap `_Owned`-field struct by field-by-field assignment | Forbidden in the safe zone ("assign to part of _Owned value"). Construct through a raw pointer inside a small `_Unsafe` block, **or** return a value-type aggregate `T` (`{ .f = … }` aggregate-init) where the API can be by-value. This is the one structural exception to "annotation-only". |
 
 ## Real-world impact (verified with the project toolchain)
 
@@ -142,3 +154,8 @@ per `bsc-design`, accepting the dual-build loss for those files).
   `#ifndef __bishengc` shim (dual-build confirmed; same source, single `#include`).
 - A member function and a `safe_malloc<int>` generic each fail under `-xc` — confirming the
   forbidden-list above is what to avoid to keep the C build.
+- A subagent application test (hardening a `malloc`+`fopen` module end-to-end) confirmed the
+  annotation-only + dual-build flow works (BSC clean, plain C clean, valgrind 0 errors) and
+  surfaced the `void*`-allocator and owned-field-heap-construction gotchas now in Common
+  mistakes — i.e. annotation-only needs **one** small `_Unsafe` construction block for any
+  heap struct with `_Owned` fields.
