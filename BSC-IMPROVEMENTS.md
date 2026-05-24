@@ -134,6 +134,44 @@
 
 ---
 
+## 第四梯队:标准库分配器(libcbs)
+
+> 两条都在本会话用项目工具链实测过,且**修复就在手里**(见附录中的 `safe_calloc` 实现)。
+
+### 7. 补一个 `safe_calloc<T>`(清零的任意类型堆分配)
+
+- **现象/证据**:本 libcbs 的分配器只有 `safe_malloc` / `safe_malloc_array` / `safe_free` /
+  `safe_free_array` / `safe_swap` —— **没有清零分配的对应物**(`grep` 全 libcbs 头零命中
+  `safe_calloc`/`calloc`)。要"清零的任意类型"只能绕 `safe_malloc<T>((T){0})`,而那要求 `T` 能被
+  `{0}` 聚合初始化(含 `_Nonnull _Owned` 字段的类型就不行)。
+- **建议(已实现 + 实测)**:加一个 5 行的 `safe_calloc<T>`,仿 `safe_malloc` 但用 `calloc` 按字节清零、
+  不收初值:
+
+  ```c
+  _Safe T *_Owned safe_calloc<T>(void) {
+      _Unsafe {
+          T *addr = (T *)calloc(1, sizeof(T));
+          if (!addr) { bsc_bad_alloc_handler(sizeof(T)); }
+          return __take_from_raw(addr);
+      }
+  }
+  ```
+  实测:漏释放被借用检查器抓到(`memory leak of value`);运行打印 `x=0 y=0`(确为清零)。
+
+### 8. `safe_malloc<T>(T t)` 的按值入参是大类型的爆栈隐患
+
+- **现象/证据**:`safe_malloc<T>` 按**值**接收初值,整个 `T` 会落到栈上。用
+  `-Wframe-larger-than` 实测一个 1 MB 的 `T`:`SAFE_MALLOC` 的调用方栈帧约 **2 MB**、
+  `safe_malloc<T>` 自身栈帧约 **1 MB**;而无值入参的 `safe_calloc<T>` 调用方约 **8 B**、自身约 **24 B**。
+  即单次大类型 `safe_malloc` 就能在两层栈帧上压掉约 3 MB,几次或更大的 `T` 即爆默认 8 MB 栈。
+- **影响**:这是个**潜伏的爆栈 footgun** —— 编译期不报错,运行期才崩;用户很难预料"分配一个堆对象"
+  会把对象先放栈上。
+- **建议**:为大类型提供**不经栈**的构造路径 —— 例如 `safe_malloc_uninit<T>()`(分配未初始化、
+  返回 `T *_Owned`,由调用方就地填字段)或就地构造变体;并在文档里明确 `safe_malloc(T t)` 的按值
+  代价。当前可用 `safe_calloc<T>()`(零栈)或裸 `malloc` + `_Unsafe` 里逐字段初始化规避。
+
+---
+
 ## 优先级总结
 
 | # | 建议 | 类别 | 上游状态(对照 782 条 issue) | 影响 |
@@ -144,6 +182,8 @@
 | 4 | `_Owned T*` 精准诊断 | 诊断 | **新**(未见登记) | 新手第一坑,零成本 |
 | 5 | `_Safe` String 字面量构造 | 标准库 | **部分**:相邻 [IBFUB1](https://gitee.com/bisheng_c_language_dep/llvm-project/issues/IBFUB1)(open) | 减少 API 退回 `const char*` |
 | 6 | 借用错误带 live-range / LSP 可靠性 | 诊断/工具 | **大体已登记**:errormsg + clangd 两簇 | 降低 ownership 推理门槛 |
+| 7 | 补 `safe_calloc<T>`(清零任意类型) | 标准库 | **新**(libcbs 无,已实现 5 行) | 清零分配,免 `(T){0}` 限制 |
+| 8 | `safe_malloc(T t)` 按值入参的大类型爆栈隐患 | 标准库 | **新**(已实测 1MB→~2MB+1MB 栈帧) | 修掉潜伏 footgun;大类型不经栈 |
 
 **值得反馈的"新"提议:#2、#3、#4**(#3 最有分量 —— 跨线程安全共享是当前完全空白)。
 #1 已有 IJC66K,只需补充我们的独立复现;#5 可在 IBFUB1 下追评;#6 归入既有 errormsg 主题。
