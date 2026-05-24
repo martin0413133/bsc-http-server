@@ -59,8 +59,16 @@ leak into the BSC build or be forgotten on the C build. `nullptr` → `((void*)0
 /* bsc_shim.h — #include this everywhere; self-activates per compiler */
 #ifdef __bishengc
 #  include "bishengc_safety.hbs"                  /* safe_malloc / safe_free — BSC only */
+   /* libcbs ships no safe_calloc; provide it — 5 lines, mirrors safe_malloc, byte-zeroes any T */
+   _Safe T *_Owned safe_calloc<T>(void) {
+       _Unsafe {
+           T *addr = (T *)calloc(1, sizeof(T));
+           if (!addr) { bsc_bad_alloc_handler(sizeof(T)); }
+           return __take_from_raw(addr);
+       }
+   }
 #  define SAFE_MALLOC(T, init) safe_malloc<T>(init)    /* alloc + init -> T *_Owned (_Safe) */
-#  define SAFE_CALLOC(T)       safe_malloc<T>((T){0})  /* zeroed T (no safe_calloc in this libcbs) */
+#  define SAFE_CALLOC(T)       safe_calloc<T>()        /* zeroed T *_Owned (_Safe) */
 #  define SAFE_FREE(p)         safe_free((void *_Owned)(p))
 #else
 #  include <stdlib.h>                             /* malloc / free — C only */
@@ -93,7 +101,7 @@ Under BSC these map to `safe_malloc<T>` / `safe_free` — both `_Safe`, so **no 
 
 ```c
 int  *_Owned p = SAFE_MALLOC(int, 42);   /* alloc + init */
-Node *_Owned n = SAFE_CALLOC(Node);      /* zeroed (this libcbs has no safe_calloc; macro uses safe_malloc<T>((T){0})) */
+Node *_Owned n = SAFE_CALLOC(Node);      /* zeroed (shim ships a 5-line safe_calloc<T> — libcbs has none) */
 SAFE_FREE(p);                            /* consume — leak/UAF still checked */
 ```
 

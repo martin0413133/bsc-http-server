@@ -53,8 +53,16 @@ BSC 编译器预定义了 `__bishengc`(已验证:`#define __bishengc 1`;普通 c
 /* bsc_shim.h —— 到处 #include 它;按编译器自动生效 */
 #ifdef __bishengc
 #  include "bishengc_safety.hbs"                  /* safe_malloc / safe_free —— 仅 BSC */
+   /* libcbs 未提供 safe_calloc;在此实现 —— 5 行,仿 safe_malloc,按字节清零任意 T */
+   _Safe T *_Owned safe_calloc<T>(void) {
+       _Unsafe {
+           T *addr = (T *)calloc(1, sizeof(T));
+           if (!addr) { bsc_bad_alloc_handler(sizeof(T)); }
+           return __take_from_raw(addr);
+       }
+   }
 #  define SAFE_MALLOC(T, init) safe_malloc<T>(init)    /* 分配+初始化 -> T *_Owned(_Safe)*/
-#  define SAFE_CALLOC(T)       safe_malloc<T>((T){0})  /* 清零的 T(本 libcbs 无 safe_calloc)*/
+#  define SAFE_CALLOC(T)       safe_calloc<T>()        /* 清零的 T *_Owned(_Safe)*/
 #  define SAFE_FREE(p)         safe_free((void *_Owned)(p))
 #else
 #  include <stdlib.h>                             /* malloc / free —— 仅 C */
@@ -86,7 +94,7 @@ BSC 下它们映射到 `safe_malloc<T>` / `safe_free` —— 都是 `_Safe`,所�
 
 ```c
 int  *_Owned p = SAFE_MALLOC(int, 42);   /* 分配+初始化 */
-Node *_Owned n = SAFE_CALLOC(Node);      /* 清零(本 libcbs 无 safe_calloc;宏用 safe_malloc<T>((T){0}))*/
+Node *_Owned n = SAFE_CALLOC(Node);      /* 清零(shim 自带 5 行 safe_calloc<T>;libcbs 无)*/
 SAFE_FREE(p);                            /* 消费 —— 泄漏/UAF 仍受检 */
 ```
 
