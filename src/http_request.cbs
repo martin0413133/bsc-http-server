@@ -1,0 +1,91 @@
+#include "../include/http_request.hbs"
+#include "../include/str_util.hbs"
+
+_Safe struct Request request_parse(const char* _Nonnull raw) {
+    struct Request r = {
+        .method = {0}, .path = {0}, .version = {0},
+        .headers = {}, .n_headers = 0,
+        .body = safe_malloc_array((size_t)1, (char)0),   // 占位
+        .body_len = 0, .ok = 0
+    };
+    size_t i = 0;
+    size_t j = 0;
+    // method（容量 8）
+    while (raw[i] != '\0' && raw[i] != ' ' && raw[i] != '\r' && raw[i] != '\n') {
+        if (j < 7) { r.method[j] = raw[i]; j++; }
+        i++;
+    }
+    r.method[j] = '\0';
+    if (raw[i] != ' ') { return r; }    // 畸形：body=占位，ok=0
+    i++;
+    // path（容量 1024）
+    j = 0;
+    while (raw[i] != '\0' && raw[i] != ' ' && raw[i] != '\r' && raw[i] != '\n') {
+        if (j < 1023) { r.path[j] = raw[i]; j++; }
+        i++;
+    }
+    r.path[j] = '\0';
+    if (raw[i] != ' ') { return r; }
+    i++;
+    // version（容量 16）
+    j = 0;
+    while (raw[i] != '\0' && raw[i] != '\r' && raw[i] != '\n') {
+        if (j < 15) { r.version[j] = raw[i]; j++; }
+        i++;
+    }
+    r.version[j] = '\0';
+    if (raw[i] != '\r' && raw[i] != '\n') { return r; }
+    if (raw[i] == '\r') { i++; }
+    if (raw[i] == '\n') { i++; }
+    // 首部直到空行
+    while (raw[i] != '\0' && raw[i] != '\r' && raw[i] != '\n') {
+        if (r.n_headers < MAX_HEADERS) {
+            size_t k = r.n_headers;
+            size_t hn = 0;
+            while (raw[i] != '\0' && raw[i] != ':' && raw[i] != '\r' && raw[i] != '\n') {
+                if (hn < 63) { r.headers[k].name[hn] = raw[i]; hn++; }
+                i++;
+            }
+            r.headers[k].name[hn] = '\0';
+            if (raw[i] == ':') { i++; }
+            while (raw[i] == ' ') { i++; }              // 跳过前导空白
+            size_t hv = 0;
+            while (raw[i] != '\0' && raw[i] != '\r' && raw[i] != '\n') {
+                if (hv < 255) { r.headers[k].value[hv] = raw[i]; hv++; }
+                i++;
+            }
+            r.headers[k].value[hv] = '\0';
+            r.n_headers = k + 1;
+        } else {
+            while (raw[i] != '\0' && raw[i] != '\n') { i++; }   // 超上限：丢弃整行
+        }
+        if (raw[i] == '\r') { i++; }
+        if (raw[i] == '\n') { i++; }
+    }
+    // 跳过空行
+    if (raw[i] == '\r') { i++; }
+    if (raw[i] == '\n') { i++; }
+    // body = 剩余
+    size_t total = i;
+    while (raw[total] != '\0') { total++; }
+    size_t blen = total - i;
+    if (blen > 0) {
+        char *_Owned _ArrayElem nb = cbuf_dup_range(raw, i, blen);
+        safe_swap(&_Mut r.body, &_Mut nb);   // r.body=真体；nb=旧占位
+        safe_free_array(nb);                 // 释放换出的占位
+        r.body_len = blen;
+    }
+    r.ok = (cstr_len(r.method) > 0 && cstr_len(r.path) > 0);
+    return r;
+}
+
+_Safe void request_free(struct Request r) {
+    safe_free_array(r.body);
+}
+
+_Safe const char* _Nullable request_get_header(const struct Request* _Borrow r, const char* _Nonnull name) {
+    for (size_t k = 0; k < r->n_headers; k++) {
+        if (cbuf_eq(r->headers[k].name, name)) { return r->headers[k].value; }
+    }
+    return nullptr;
+}
