@@ -2,6 +2,8 @@
 
 > **致执行者（agentic worker）：** 必需子技能：用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 按任务逐个实现本计划。步骤用复选框（`- [ ]`）语法跟踪。
 
+> **⚠️ 实现偏差（2026-05-25）：** 本计划下方代码块仍写作 `_Owned struct` + 析构函数。**已落地的实现额外禁用了 `_Owned struct`/析构**——改用普通 `struct` + `char *_Owned _ArrayElem` 字段 + 显式 `*_free(struct T r)`（按值移入释放），每条路径手动释放。实际做法、踩坑与验证见根目录 `CLAUDE.md`。
+
 **目标:** 用 BiSheng C 构建一个内存安全的 HTTP/1.1 服务器，提供静态文件与动态路由，含 pthread 线程池；**仅使用所有权系统**——不使用 libcbs 容器、不使用成员函数、不使用 trait、不为自定义类型使用泛型。
 
 **架构:** 模块化单一翻译单元——每个关注点一对 `.hbs`/`.cbs`；`src/main.cbs` 按依赖顺序 `#include` 各 `.cbs` 并作为一个单元编译。业务模块（str_util/mime/http_request/http_response/config/router/file_server/handler）100% `_Safe`、无 `_Unsafe`，由独立单测程序验证。IO/线程模块（platform/net、fs、log、thread_pool、runtime）用最小 `_Unsafe` FFI 接缝，由 curl 集成测试验证。
