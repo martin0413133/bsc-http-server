@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Enforce the layering rule: business code (src/*.cbs, top level) must contain NO _Unsafe.
-# All _Unsafe must live in the adapter layer (src/platform/*.cbs).
+# Enforce the layering rule: business code (src/*.c, top level) must contain NO _Unsafe.
+# All _Unsafe must live in the adapter layer (src/platform/*.c).
 # Comments are ignored (we strip // line comments before matching).
 set -u
 cd "$(dirname "$0")/.."
 
 violations=0
-for f in src/*.cbs; do
+for f in src/*.c; do
     [ -e "$f" ] || continue
     # strip // line comments, then look for the _Unsafe keyword in real code
     hits=$(sed 's://.*$::' "$f" | grep -nE '_Unsafe')
@@ -21,5 +21,5 @@ if [ "$violations" -ne 0 ]; then
     echo "FAIL: business layer must be _Unsafe-free (move syscalls into src/platform/ adapters)."
     exit 1
 fi
-echo "ok: business layer (src/*.cbs) is _Unsafe-free"
+echo "ok: business layer (src/*.c) is _Unsafe-free"
 exit 0

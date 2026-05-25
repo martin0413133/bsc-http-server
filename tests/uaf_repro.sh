@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 CC=/home/zly/bsc/llvm-project/build/bin/clang
 INC=-I/home/zly/bsc/llvm-project/install/include/libcbs
 LIB=(-L/home/zly/bsc/llvm-project/install/lib -lstdcbs -lpthread)
-SRC=tests/uaf_repro.cbs
+SRC=tests/uaf_repro.c
 
 WARN="-Wno-nullability-completeness"
 $CC -g $WARN "$INC" -DREPRO_BAD "$SRC" -o /tmp/uaf_bad  "${LIB[@]}" || { echo "BAD build failed";  exit 2; }

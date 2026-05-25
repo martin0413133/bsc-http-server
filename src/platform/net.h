@@ -1,0 +1,25 @@
+#ifndef CC_NET_HBS
+#define CC_NET_HBS
+#include <stddef.h>
+#include "../../include/cstring.h"
+
+struct ssl_ctx_st;
+struct ssl_st;
+
+_Safe int   net_listen(int port, int backlog);
+_Safe int   net_accept(int listen_fd);
+_Safe _Bool net_recv_string(int fd, cstring* _Borrow out);
+_Safe _Bool net_send_string(int fd, const cstring* _Borrow data);
+_Safe void  net_close(int fd);
+
+typedef struct SSLCtx  { struct ssl_ctx_st *_Owned _Nonnull raw_ctx; } SSLCtx;
+typedef struct SSLConn { struct ssl_st     *_Owned _Nonnull raw_ssl; int fd; } SSLConn;
+
+_Safe SSLCtx  *_Owned _Nullable net_ssl_ctx_new(const char* _Nonnull cert_file,
+                                                 const char* _Nonnull key_file);
+_Safe SSLConn *_Owned _Nullable net_ssl_accept(const SSLCtx* _Borrow ctx, int fd);
+_Safe _Bool net_ssl_recv_string(SSLConn* _Borrow ssl, cstring* _Borrow out);
+_Safe _Bool net_ssl_send_string(SSLConn* _Borrow ssl, const cstring* _Borrow data);
+_Safe void net_ssl_conn_free(SSLConn *_Owned _Nullable ssl);
+_Safe void net_ssl_ctx_free(SSLCtx *_Owned _Nullable ctx);
+#endif

@@ -1,0 +1,49 @@
+#include <stdio.h>
+#include <string.h>
+#include "../src/str_util.c"
+#include "../src/http_request.c"
+#include "../src/http_response.c"
+#include "../src/config.c"
+#include "../src/router.c"
+#include "../src/mime.c"
+#include "../src/platform/fs.c"
+#include "../src/file_server.c"
+#include "../src/handler.c"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+_Safe Response hello(const Request* _Borrow req) { return Response_ok_text("ROUTED", "text/plain"); }
+
+int main(void) {
+    cstring cfgtext = cstring_new();
+    str_append_cstr(&_Mut cfgtext, "document_root = www\n");
+    Config cfg = Config_parse(&_Const cfgtext);
+    Router rt = Router_new();
+    Router_add(&_Mut rt, "GET", "/hello", hello);
+
+    Response r1 = handle_request(&_Const cfg, &_Const rt, "GET /hello HTTP/1.1\r\n\r\n");
+    CHECK(r1.status == 200, "route status");
+    char b1[256]; cstring_to_cbuf(&_Const r1.body, b1, 256);
+    _Unsafe { CHECK(strstr(b1, "ROUTED") != NULL, "route body"); }
+
+    Response r2 = handle_request(&_Const cfg, &_Const rt, "GET / HTTP/1.1\r\n\r\n");
+    CHECK(r2.status == 200, "static index status");
+
+    Response r3 = handle_request(&_Const cfg, &_Const rt, "GET /missing HTTP/1.1\r\n\r\n");
+    CHECK(r3.status == 404, "404 status");
+
+    Response r4 = handle_request(&_Const cfg, &_Const rt, "garbage");
+    CHECK(r4.status == 400, "bad request status");
+
+    Response r5 = handle_request(&_Const cfg, &_Const rt, "POST / HTTP/1.1\r\n\r\n");
+    CHECK(r5.status == 405, "non-GET static -> 405");
+
+    cstring_free(cfgtext);
+    Config_free(cfg);
+    Router_free(rt);
+    Response_free(r1); Response_free(r2); Response_free(r3); Response_free(r4); Response_free(r5);
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_handler OK\n");}
+    return 0;
+}

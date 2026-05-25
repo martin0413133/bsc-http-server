@@ -1,0 +1,21 @@
+#include "fs.h"
+#include <stdio.h>
+
+#define FS_CHUNK 4096
+
+_Safe _Bool fs_read_file(const char* _Nonnull path, cstring* _Borrow out) {
+    char chunk[FS_CHUNK] = {0};
+    _Bool ok = 0;
+    _Unsafe {
+        FILE* f = fopen(path, "rb");
+        if (f != NULL) {
+            size_t n;
+            while ((n = fread(chunk, 1, FS_CHUNK, f)) > 0) {
+                for (size_t i = 0; i < n; i++) { cstring_push(out, chunk[i]); }
+            }
+            fclose(f);
+            ok = 1;
+        }
+    }
+    return ok;
+}
