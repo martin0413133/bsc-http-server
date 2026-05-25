@@ -1,11 +1,10 @@
 #ifndef CC_STR_UTIL_HBS
 #define CC_STR_UTIL_HBS
 #include <stddef.h>
-#include "string.hbs"
+#include "cstring.hbs"
 
-_Safe void str_append_cstr(String* _Borrow s, const char* _Nonnull cstr);
-_Safe void str_append(String* _Borrow dst, const String* _Borrow src);
-// Copies up to cap-1 bytes of s into out and NUL-terminates. Returns bytes written.
-_Safe size_t str_to_cbuf(const String* _Borrow s, char* _Nonnull out, size_t cap);
-_Safe _Bool str_eq_cstr(const String* _Borrow s, const char* _Nonnull cstr);
+_Safe void str_append_cstr(cstring* _Borrow s, const char* _Nonnull cstr);
+_Safe void str_append(cstring* _Borrow dst, const cstring* _Borrow src);
+_Safe size_t str_to_cbuf(const cstring* _Borrow s, char* _Nonnull out, size_t cap);
+_Safe _Bool str_eq_cstr(const cstring* _Borrow s, const char* _Nonnull cstr);
 #endif

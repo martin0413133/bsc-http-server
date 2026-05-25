@@ -1,12 +1,11 @@
 #include <stdio.h>
-#include "string.hbs"
-#include "vec.hbs"
+#include "../include/cstring.hbs"
 
 int main(void) {
-    String s = String::new();
-    s.push('h'); s.push('i');
-    Vec<int> v = Vec<int>::new();
-    v.push(7);
-    _Unsafe { printf("smoke len=%zu vec0=%d\n", s.length(), *v.get(0)); }
+    cstring s = cstring_new();
+    cstring_push(&_Mut s, 'h');
+    cstring_push(&_Mut s, 'i');
+    _Unsafe { printf("smoke len=%zu char0=%c\n", cstring_len(&_Const s), cstring_at(&_Const s, 0)); }
+    cstring_free(s);
     return 0;
 }

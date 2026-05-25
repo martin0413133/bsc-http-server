@@ -21,7 +21,7 @@ UNITS := str_util mime http_request http_response config router path_guard fs fi
 
 # Build any test:  make test-X  (compiles tests/test_X.cbs)
 test-%: tests/test_%.cbs | $(BINDIR)
-	$(CC) $(FLAGS) $(INC) $< -o $(BINDIR)/test_$* $(LIB)
+	$(CC) $(FLAGS) $(INC) $< src/platform/cstring.cbs -o $(BINDIR)/test_$* $(LIB)
 	./$(BINDIR)/test_$*
 
 # Build + run every unit test.
@@ -40,7 +40,7 @@ integration: $(BINDIR)/httpd
 check: test valgrind integration
 
 smoke: tests/smoke.cbs | $(BINDIR)
-	$(CC) $(FLAGS) $(INC) $< -o $(BINDIR)/smoke $(LIB)
+	$(CC) $(FLAGS) $(INC) $< src/platform/cstring.cbs -o $(BINDIR)/smoke $(LIB)
 	./$(BINDIR)/smoke
 
 run: $(BINDIR)/httpd

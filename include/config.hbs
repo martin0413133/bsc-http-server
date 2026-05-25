@@ -1,17 +1,22 @@
 #ifndef CC_CONFIG_HBS
 #define CC_CONFIG_HBS
-#include "string.hbs"
+#include "cstring.hbs"
 
-_Owned struct Config {
-_Public:
+typedef struct Config {
     int port;
     int threads;
-    String document_root;
+    cstring document_root;
     int ssl_port;
-    String ssl_cert;
-    String ssl_key;
-};
+    cstring ssl_cert;
+    cstring ssl_key;
+} Config;
 
-_Safe Config Config::default_config(void);
-_Safe Config Config::parse(const String* _Borrow text);   // parse from a String (business; no file IO)
+_Safe void Config_free(Config c) {
+    cstring_free(c.document_root);
+    cstring_free(c.ssl_cert);
+    cstring_free(c.ssl_key);
+}
+
+_Safe Config Config_default(void);
+_Safe Config Config_parse(const cstring* _Borrow text);
 #endif

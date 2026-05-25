@@ -1,7 +1,6 @@
 #ifndef CC_FS_HBS
 #define CC_FS_HBS
-#include "string.hbs"
+#include "../../include/cstring.hbs"
 
-// Adapter: read an entire file into `out`. Returns false if the file can't be opened.
-_Safe _Bool fs_read_file(const char* _Nonnull path, String* _Borrow out);
+_Safe _Bool fs_read_file(const char* _Nonnull path, cstring* _Borrow out);
 #endif

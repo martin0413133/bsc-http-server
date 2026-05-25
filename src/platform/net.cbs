@@ -65,23 +65,23 @@ _Safe int net_accept(int listen_fd) {
     return fd;
 }
 
-_Safe _Bool net_recv_string(int fd, String* _Borrow out) {
+_Safe _Bool net_recv_string(int fd, cstring* _Borrow out) {
     char buf[NET_RECV_BUF] = {0};
     ssize_t n;
     _Unsafe { n = recv(fd, buf, NET_RECV_BUF - 1, 0); }
     if (n <= 0) { return 0; }
     size_t got = (size_t)n;
-    for (size_t i = 0; i < got; i++) { out->push(buf[i]); }
+    for (size_t i = 0; i < got; i++) { cstring_push(out, buf[i]); }
     return 1;
 }
 
-_Safe _Bool net_send_string(int fd, const String* _Borrow data) {
-    size_t len = data->length();
+_Safe _Bool net_send_string(int fd, const cstring* _Borrow data) {
+    size_t len = cstring_len(data);
     size_t off = 0;
     while (off < len) {
         char chunk[NET_SEND_CHUNK] = {0};
         size_t m = 0;
-        while (off < len && m < NET_SEND_CHUNK) { chunk[m] = data->at(off); m++; off++; }
+        while (off < len && m < NET_SEND_CHUNK) { chunk[m] = cstring_at(data, off); m++; off++; }
         _Unsafe {
             size_t sent = 0;
             while (sent < m) {
@@ -133,23 +133,23 @@ _Safe SSLConn *_Owned _Nullable net_ssl_accept(const SSLCtx* _Borrow ctx, int fd
     return p;
 }
 
-_Safe _Bool net_ssl_recv_string(SSLConn* _Borrow ssl, String* _Borrow out) {
+_Safe _Bool net_ssl_recv_string(SSLConn* _Borrow ssl, cstring* _Borrow out) {
     char buf[NET_RECV_BUF] = {0};
     int n;
     _Unsafe { n = SSL_read(&_Mut *ssl->raw_ssl, buf, NET_RECV_BUF - 1); }
     if (n <= 0) { return 0; }
     size_t got = (size_t)n;
-    for (size_t i = 0; i < got; i++) { out->push(buf[i]); }
+    for (size_t i = 0; i < got; i++) { cstring_push(out, buf[i]); }
     return 1;
 }
 
-_Safe _Bool net_ssl_send_string(SSLConn* _Borrow ssl, const String* _Borrow data) {
-    size_t len = data->length();
+_Safe _Bool net_ssl_send_string(SSLConn* _Borrow ssl, const cstring* _Borrow data) {
+    size_t len = cstring_len(data);
     size_t off = 0;
     while (off < len) {
         char chunk[NET_SEND_CHUNK] = {0};
         size_t m = 0;
-        while (off < len && m < NET_SEND_CHUNK) { chunk[m] = data->at(off); m++; off++; }
+        while (off < len && m < NET_SEND_CHUNK) { chunk[m] = cstring_at(data, off); m++; off++; }
         _Unsafe {
             if (SSL_write(&_Mut *ssl->raw_ssl, chunk, (int)m) <= 0) { return 0; }
         }

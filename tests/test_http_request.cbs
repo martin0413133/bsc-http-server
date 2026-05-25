@@ -11,19 +11,21 @@ int main(void) {
         "Host: localhost\r\n"
         "User-Agent: test\r\n"
         "\r\n";
-    Request req = Request::parse(raw);
-    CHECK(str_eq_cstr(&_Const req.method, "GET"), "method");
-    CHECK(str_eq_cstr(&_Const req.path, "/index.html"), "path");
-    CHECK(str_eq_cstr(&_Const req.version, "HTTP/1.1"), "version");
+    Request req = Request_parse(raw);
+    CHECK(cstring_eq_cstr(&_Const req.method, "GET"), "method");
+    CHECK(cstring_eq_cstr(&_Const req.path, "/index.html"), "path");
+    CHECK(cstring_eq_cstr(&_Const req.version, "HTTP/1.1"), "version");
     CHECK(req.ok, "ok flag");
 
-    const String* _Borrow host = req.get_header("Host");
-    CHECK(host != nullptr && str_eq_cstr(host, "localhost"), "host header");
-    CHECK(req.get_header("Nope") == nullptr, "missing header");
+    const cstring* _Borrow host = Request_get_header(&_Const req, "Host");
+    CHECK(host != nullptr && cstring_eq_cstr(host, "localhost"), "host header");
+    CHECK(Request_get_header(&_Const req, "Nope") == nullptr, "missing header");
 
-    Request bad = Request::parse("garbage-no-crlf");
+    Request bad = Request_parse("garbage-no-crlf");
     CHECK(!bad.ok, "malformed not ok");
 
+    Request_free(req);
+    Request_free(bad);
     if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
     _Unsafe{printf("test_http_request OK\n");}
     return 0;
