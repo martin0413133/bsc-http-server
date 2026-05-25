@@ -1,0 +1,62 @@
+#include "../include/str_util.hbs"
+
+_Safe size_t cstr_len(const char* _Nonnull s) {
+    size_t n = 0;
+    while (s[n] != '\0') { n++; }
+    return n;
+}
+
+_Safe void cbuf_copy(char* _Nonnull dst, size_t cap, const char* _Nonnull src) {
+    if (cap == 0) { return; }
+    size_t i = 0;
+    while (src[i] != '\0' && i < cap - 1) { dst[i] = src[i]; i++; }
+    dst[i] = '\0';
+}
+
+_Safe _Bool cbuf_eq(const char* _Nonnull a, const char* _Nonnull b) {
+    size_t i = 0;
+    while (a[i] != '\0' && b[i] != '\0') {
+        if (a[i] != b[i]) { return 0; }
+        i++;
+    }
+    return a[i] == b[i];   // 都到 '\0' 才相等
+}
+
+_Safe _Bool cbuf_starts_with(const char* _Nonnull s, const char* _Nonnull prefix) {
+    size_t i = 0;
+    while (prefix[i] != '\0') {
+        if (s[i] != prefix[i]) { return 0; }
+        i++;
+    }
+    return 1;
+}
+
+_Safe char *_Owned _ArrayElem cbuf_dup_range(const char* _Nonnull s, size_t start, size_t len) {
+    char *_Owned _ArrayElem out = safe_malloc_array(len + 1, (char)0);
+    for (size_t i = 0; i < len; i++) { out[i] = s[start + i]; }
+    out[len] = '\0';
+    return out;
+}
+
+_Safe size_t uint_digits(size_t n) {
+    if (n == 0) { return 1; }
+    size_t d = 0;
+    while (n > 0) { d++; n /= 10; }
+    return d;
+}
+
+_Safe void put_cstr(char *_Borrow _ArrayElem buf, size_t* _Borrow pos, const char* _Nonnull s) {
+    size_t p = *pos;
+    for (size_t i = 0; s[i] != '\0'; i++) { buf[p] = s[i]; p++; }
+    *pos = p;
+}
+
+_Safe void put_uint(char *_Borrow _ArrayElem buf, size_t* _Borrow pos, size_t n) {
+    char tmp[24] = {0};
+    size_t k = 0;
+    if (n == 0) { tmp[0] = '0'; k = 1; }
+    else { while (n > 0) { tmp[k] = (char)('0' + (int)(n % 10)); n /= 10; k++; } }
+    size_t p = *pos;
+    while (k > 0) { k--; buf[p] = tmp[k]; p++; }
+    *pos = p;
+}

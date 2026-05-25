@@ -1,0 +1,18 @@
+#ifndef CC_STR_UTIL_HBS
+#define CC_STR_UTIL_HBS
+#include <stddef.h>
+#include "bishengc_safety.hbs"
+
+_Safe size_t cstr_len(const char* _Nonnull s);
+// 拷贝 src 到 dst（最多 cap-1 字节）并 NUL 结尾
+_Safe void   cbuf_copy(char* _Nonnull dst, size_t cap, const char* _Nonnull src);
+_Safe _Bool  cbuf_eq(const char* _Nonnull a, const char* _Nonnull b);
+_Safe _Bool  cbuf_starts_with(const char* _Nonnull s, const char* _Nonnull prefix);
+// 复制 s[start .. start+len) 到一个新 owned 缓冲（末尾追加 '\0'）；调用方负责 safe_free_array
+_Safe char *_Owned _ArrayElem cbuf_dup_range(const char* _Nonnull s, size_t start, size_t len);
+// 十进制位数（0 -> 1）
+_Safe size_t uint_digits(size_t n);
+// 往 buf[*pos..] 写入并推进 *pos（buf 须为 _Borrow _ArrayElem：调用方传 &_Mut owned[0]）
+_Safe void   put_cstr(char *_Borrow _ArrayElem buf, size_t* _Borrow pos, const char* _Nonnull s);
+_Safe void   put_uint(char *_Borrow _ArrayElem buf, size_t* _Borrow pos, size_t n);
+#endif

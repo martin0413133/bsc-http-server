@@ -1,0 +1,32 @@
+#include "bishengc_safety.hbs"
+#include <stdio.h>
+#include "../src/str_util.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+_Safe int main(void) {
+    char dst[16] = {0};
+    cbuf_copy(dst, 16, "GET /x");
+    CHECK(cstr_len(dst) == 6, "copy length");
+    CHECK(cbuf_eq(dst, "GET /x"), "eq true");
+    CHECK(!cbuf_eq(dst, "GET /y"), "eq false");
+    CHECK(cbuf_starts_with(dst, "GET"), "starts_with true");
+    CHECK(!cbuf_starts_with(dst, "POST"), "starts_with false");
+    CHECK(uint_digits(0) == 1 && uint_digits(7) == 1 && uint_digits(404) == 3, "uint_digits");
+
+    char *_Owned _ArrayElem d = cbuf_dup_range("abcdef", 2, 3);   // "cde"
+    CHECK(d[0]=='c' && d[1]=='d' && d[2]=='e' && d[3]=='\0', "dup_range");
+    safe_free_array(d);
+
+    char buf[32] = {0};
+    size_t pos = 0;
+    put_cstr(&_Mut buf[0], &_Mut pos, "n=");
+    put_uint(&_Mut buf[0], &_Mut pos, 42);
+    buf[pos] = '\0';
+    CHECK(cbuf_eq(buf, "n=42"), "put_cstr+put_uint");
+
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_str_util OK\n");}
+    return 0;
+}
