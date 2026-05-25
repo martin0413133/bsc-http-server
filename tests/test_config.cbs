@@ -7,8 +7,8 @@ static int fails = 0;
 #define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
 
 _Safe int main(void) {
-    const char* _Nonnull text = "# comment\nport = 9090\ndocument_root = public\nthreads=8\n";
-    struct Config c = config_parse(text);
+    // 字面量可直接传 _Borrow _ArrayElem 形参（无需先存到 const char* 变量）
+    struct Config c = config_parse("# comment\nport = 9090\ndocument_root = public\nthreads=8\n");
     CHECK(c.port == 9090, "port");
     CHECK(c.threads == 8, "threads");
     CHECK(cbuf_eq(c.document_root, "public"), "doc root");

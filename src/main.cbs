@@ -25,10 +25,8 @@ _Safe int main(void) {
     char *_Owned _ArrayElem _Nullable ctext = fs_read_file("config.ini", &_Mut clen);
     struct Config config = config_default();
     if (ctext != nullptr) {
-        // 借用不能转成 config_parse 的裸 const char* 形参；拷到栈缓冲再解析。
-        char cbuf[8192] = {0};
-        for (size_t i = 0; i < clen && i < sizeof(cbuf) - 1; i++) { cbuf[i] = ctext[i]; }
-        config = config_parse(cbuf);
+        // config_parse 形参为 _Borrow _ArrayElem：直接借用 owned 缓冲，免去栈拷贝。
+        config = config_parse(&_Const ctext[0]);
         safe_free_array(ctext);
     }
 

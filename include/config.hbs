@@ -9,5 +9,7 @@ struct Config {
 };
 
 _Safe struct Config config_default(void);
-_Safe struct Config config_parse(const char* _Nonnull text);   // 从缓冲解析
+// 从缓冲解析。形参用 _Borrow _ArrayElem：既能下标遍历，又能直接收字面量与
+// owned 缓冲的 &_Const x[0]（免去把 owned 拷到栈裸缓冲）。
+_Safe struct Config config_parse(const char *_Borrow _ArrayElem text);
 #endif

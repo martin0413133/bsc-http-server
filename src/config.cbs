@@ -17,7 +17,7 @@ _Safe int parse_int_buf(const char* _Nonnull s) {
     return v;
 }
 
-_Safe struct Config config_parse(const char* _Nonnull text) {
+_Safe struct Config config_parse(const char *_Borrow _ArrayElem text) {
     struct Config c = config_default();
     size_t i = 0;
     while (text[i] != '\0') {
