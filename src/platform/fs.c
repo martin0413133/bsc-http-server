@@ -6,6 +6,7 @@
 _Safe _Bool fs_read_file(const char* _Nonnull path, cstring* _Borrow out) {
     char chunk[FS_CHUNK] = {0};
     _Bool ok = 0;
+    // _Unsafe: fopen/fread/fclose are raw C FILE* I/O — no _Safe alternative
     _Unsafe {
         FILE* f = fopen(path, "rb");
         if (f != NULL) {

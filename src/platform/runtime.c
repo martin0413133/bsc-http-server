@@ -23,13 +23,17 @@ static void rt_on_signal(int sig) { (void)sig; g_shutdown = 1; }
 // are RAII-managed; only the void*/raw bridge is _Unsafe.
 _Safe void runtime_handle_conn(struct ConnJob job, void* _Nonnull ctx_raw) {
     // Bridge raw shared context -> borrows for the business core.
+    // _Unsafe: void*→struct* raw cast (thread boundary — type info lost across pthread)
     struct ServerCtx* ctx = _Unsafe((struct ServerCtx*)ctx_raw);
+    // _Unsafe: raw const T*→_Borrow bridge (process-lifetime heap allocation, no destructor)
     const Config* _Borrow cfg = _Unsafe(&_Const *(ctx->config));
     const Router* _Borrow rt  = _Unsafe(&_Const *(ctx->router));
 
     // For SSL connections, do the TLS handshake now (worker owns the SSLConn).
     SSLConn *_Owned _Nullable sconn = nullptr;
+    // _Unsafe: void*→bool check (ssl_ctx may be null, void* has no nullability in BSC)
     if (job.is_ssl && _Unsafe(ctx->ssl_ctx)) {
+        // _Unsafe: raw void*→SSLCtx* cast + _Borrow bridge (same lifetime as config/router)
         const SSLCtx* _Borrow bctx = _Unsafe(&_Const *((SSLCtx* _Nonnull)ctx->ssl_ctx));
         sconn = net_ssl_accept(bctx, job.fd);
     }
@@ -98,6 +102,7 @@ _Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
         }
         ssl_ctx = net_ssl_ctx_new(cert, key);
         if (!ssl_ctx) {
+            // _Unsafe: fprintf — variadic C function, no _Safe declaration possible
             _Unsafe { fprintf(stderr, "cc_httpd: SSL init failed (cert=%s key=%s), running HTTP only\n",
                               cert, key); }
             ssl_port = 0;
@@ -106,6 +111,10 @@ _Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
         ssl_port = 0;
     }
 
+    // _Unsafe: signal/sigaction (OS-level function pointers + union field access),
+    // FD_*/select (preprocessor macros, cannot be declared _Safe),
+    // __move_to_raw (ownership bypass for process-lifetime allocation),
+    // fprintf (variadic C function)
     _Unsafe {
         signal(SIGPIPE, SIG_IGN);
 
@@ -123,7 +132,7 @@ _Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
         ctx.ssl_ctx = ssl_ctx ? (void* _Nullable)__move_to_raw(ssl_ctx) : (void* _Nullable)0;
 
         static struct ThreadPool pool;
-        if (thread_pool_start(&pool, threads, runtime_handle_conn, &ctx) != 0) { return -1; }
+        if (thread_pool_start(&_Mut pool, threads, runtime_handle_conn, &ctx) != 0) { return -1; }
 
         int listen_fd = net_listen(port, 128);
         if (listen_fd < 0) { return -1; }
@@ -167,21 +176,21 @@ _Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
                 int client = net_accept(listen_fd);
                 if (client >= 0) {
                     struct ConnJob job = { .fd = client, .is_ssl = 0 };
-                    thread_pool_submit(&pool, job);
+                    thread_pool_submit(&_Mut pool, job);
                 }
             }
             if (ssl_listen_fd >= 0 && FD_ISSET(ssl_listen_fd, &rfds)) {
                 int client = net_accept(ssl_listen_fd);
                 if (client >= 0) {
                     struct ConnJob job = { .fd = client, .is_ssl = 1 };
-                    thread_pool_submit(&pool, job);
+                    thread_pool_submit(&_Mut pool, job);
                 }
             }
         }
 
         // Drain in-flight requests, stop workers, release the listen socket.
         fprintf(stderr, "cc_httpd shutting down...\n");
-        thread_pool_shutdown(&pool);
+        thread_pool_shutdown(&_Mut pool);
         net_close(listen_fd);
         if (ssl_listen_fd >= 0) { net_close(ssl_listen_fd); }
     }
