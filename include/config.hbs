@@ -1,0 +1,13 @@
+#ifndef CC_CONFIG_HBS
+#define CC_CONFIG_HBS
+#include <stddef.h>
+
+struct Config {
+    int port;
+    int threads;
+    char document_root[256];
+};
+
+_Safe struct Config config_default(void);
+_Safe struct Config config_parse(const char* _Nonnull text);   // 从缓冲解析
+#endif

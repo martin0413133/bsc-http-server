@@ -1,0 +1,23 @@
+#include "bishengc_safety.hbs"
+#include <stdio.h>
+#include "../src/str_util.cbs"
+#include "../src/config.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+_Safe int main(void) {
+    const char* _Nonnull text = "# comment\nport = 9090\ndocument_root = public\nthreads=8\n";
+    struct Config c = config_parse(text);
+    CHECK(c.port == 9090, "port");
+    CHECK(c.threads == 8, "threads");
+    CHECK(cbuf_eq(c.document_root, "public"), "doc root");
+
+    struct Config d = config_default();
+    CHECK(d.port == 8080, "default port");
+    CHECK(cbuf_eq(d.document_root, "www"), "default root");
+
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_config OK\n");}
+    return 0;
+}

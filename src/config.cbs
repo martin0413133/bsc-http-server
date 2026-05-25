@@ -1,0 +1,57 @@
+#include "../include/config.hbs"
+#include "../include/str_util.hbs"
+
+_Safe struct Config config_default(void) {
+    struct Config c = { .port = 8080, .threads = 4, .document_root = {0} };
+    cbuf_copy(c.document_root, 256, "www");
+    return c;
+}
+
+// 从只含数字的 char 缓冲解析十进制 int
+_Safe int parse_int_buf(const char* _Nonnull s) {
+    int v = 0;
+    for (size_t i = 0; s[i] != '\0'; i++) {
+        char ch = s[i];
+        if (ch >= '0' && ch <= '9') { v = v * 10 + (int)(ch - '0'); }
+    }
+    return v;
+}
+
+_Safe struct Config config_parse(const char* _Nonnull text) {
+    struct Config c = config_default();
+    size_t i = 0;
+    while (text[i] != '\0') {
+        while (text[i] == ' ' || text[i] == '\t') { i++; }
+        if (text[i] == '#' || text[i] == '\n' || text[i] == '\r') {
+            while (text[i] != '\0' && text[i] != '\n') { i++; }
+            if (text[i] == '\n') { i++; }
+            continue;
+        }
+        if (text[i] == '\0') { break; }
+        char key[64] = {0};
+        char val[256] = {0};
+        size_t k = 0;
+        while (text[i] != '\0' && text[i] != '=' && text[i] != '\n'
+               && text[i] != ' ' && text[i] != '\t') {
+            if (k < 63) { key[k] = text[i]; k++; }
+            i++;
+        }
+        key[k] = '\0';
+        while (text[i] == ' ' || text[i] == '\t') { i++; }
+        if (text[i] == '=') { i++; }
+        while (text[i] == ' ' || text[i] == '\t') { i++; }
+        size_t m = 0;
+        while (text[i] != '\0' && text[i] != '\n' && text[i] != '\r' && text[i] != ' ') {
+            if (m < 255) { val[m] = text[i]; m++; }
+            i++;
+        }
+        val[m] = '\0';
+        while (text[i] != '\0' && text[i] != '\n') { i++; }
+        if (text[i] == '\n') { i++; }
+
+        if (cbuf_eq(key, "port")) { c.port = parse_int_buf(val); }
+        else if (cbuf_eq(key, "threads")) { c.threads = parse_int_buf(val); }
+        else if (cbuf_eq(key, "document_root")) { cbuf_copy(c.document_root, 256, val); }
+    }
+    return c;
+}
