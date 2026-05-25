@@ -6,7 +6,8 @@
 
 #define MAX_ROUTES 32
 
-typedef struct Response (*Handler)(const struct Request* _Borrow req);
+// 函数指针须带 _Safe 才能在安全区内调用（指向 _Safe 处理函数）。
+typedef _Safe struct Response (*Handler)(const struct Request* _Borrow req);
 
 struct Route { char method[8]; char path[256]; Handler handler; };
 

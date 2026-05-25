@@ -1,0 +1,50 @@
+#include "bishengc_safety.hbs"
+#include <stdio.h>
+#include <string.h>
+#include "../src/str_util.cbs"
+#include "../src/mime.cbs"
+#include "../src/http_request.cbs"
+#include "../src/http_response.cbs"
+#include "../src/config.cbs"
+#include "../src/router.cbs"
+#include "../src/platform/fs.cbs"
+#include "../src/file_server.cbs"
+#include "../src/handler.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+// 借用读取 owned 报文（不消费所有权）
+_Safe _Bool wire_contains(const char *_Borrow _ArrayElem wire, size_t len, const char* _Nonnull needle) {
+    char buf[8192] = {0};
+    for (size_t i = 0; i < len && i < 8191; i++) { buf[i] = wire[i]; }
+    _Unsafe { return strstr(buf, needle) != NULL; }
+}
+
+_Safe struct Response route_hello(const struct Request* _Borrow req) {
+    (void)req;
+    return response_with_cstr(200, "OK", "text/html", "<h1>hello route</h1>");
+}
+
+_Safe int main(void) {
+    struct Config cfg = config_default();
+    struct Router rt = router_new();
+    router_add(&_Mut rt, "GET", "/hello", route_hello);
+
+    // 动态路由命中
+    struct Response r1 = handle_request(&_Const cfg, &_Const rt, "GET /hello HTTP/1.1\r\n\r\n");
+    size_t n1 = 0;
+    char *_Owned _ArrayElem w1 = response_serialize(&_Const r1, &_Mut n1);
+    CHECK(wire_contains(&_Const w1[0], n1, "hello route"), "dynamic route body");
+    safe_free_array(w1);
+    response_free(r1);
+
+    // 畸形 -> 400
+    struct Response r2 = handle_request(&_Const cfg, &_Const rt, "garbage");
+    CHECK(r2.status == 400, "malformed -> 400");
+    response_free(r2);
+
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_handler OK\n");}
+    return 0;
+}

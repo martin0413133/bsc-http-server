@@ -1,0 +1,21 @@
+#include "../include/handler.hbs"
+#include "../include/http_request.hbs"
+#include "../include/file_server.hbs"
+
+_Safe struct Response handle_request(const struct Config* _Borrow cfg, const struct Router* _Borrow router,
+                                     const char* _Nonnull raw) {
+    struct Request req = request_parse(raw);
+    if (!req.ok) {
+        request_free(req);                          // 畸形：先释放 req 再返回
+        return response_bad_request();
+    }
+    Handler h = router_match(router, &_Const req);
+    if (h != nullptr) {                             // 命中动态路由
+        struct Response resp = h(&_Const req);
+        request_free(req);                          // borrow 已结束，释放 req
+        return resp;
+    }
+    struct Response resp = serve_static(cfg, &_Const req);   // 否则静态文件
+    request_free(req);
+    return resp;
+}
