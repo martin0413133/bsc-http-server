@@ -1,0 +1,26 @@
+#include "bishengc_safety.hbs"
+#include <stddef.h>
+#include <stdio.h>
+
+/* ownership-only, no _Owned struct: plain struct + explicit free */
+struct Buf {
+    char *_Owned _ArrayElem data;
+    size_t len;
+};
+
+_Safe void buf_free(struct Buf b) { safe_free_array(b.data); }
+
+_Safe struct Buf make(void) {
+    struct Buf b = { .data = safe_malloc_array((size_t)4, (char)0), .len = 2 };
+    b.data[0] = 'h'; b.data[1] = 'i';
+    return b;
+}
+
+_Safe int main(void) {
+    struct Buf b = make();
+    char c0 = b.data[0];
+    char c1 = b.data[1];
+    _Unsafe { printf("smoke len=%zu data=%c%c\n", b.len, c0, c1); }
+    buf_free(b);
+    return 0;
+}
