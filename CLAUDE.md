@@ -33,7 +33,9 @@ FLAGS := -Wall -Wextra -Wno-nullability-completeness -g
 1. **安全区不能把借用结构里的指针字段拷成独立指针**（`const char *const` → `const char *` 被禁）。
    故 `Response.status_text`/`content_type` 用定长 `char[]` 而非 `const char*`——数组字段经借用穿透传参是允许的。
 2. **函数指针须带 `_Safe` 才能在安全区调用**：`typedef _Safe struct Response (*Handler)(...)`。
-3. **借用不能转裸 `const char*` 形参**：`main` 把 config 文本从 owned 缓冲拷到栈 `char[]` 再 `config_parse`。
+3. **借用不能转裸 `const char*` 形参**（`_Borrow`↔裸指针在安全区互转被禁）。需要「按下标遍历 + 既收
+   字面量又收 owned 缓冲」的只读形参，用 `const char *_Borrow _ArrayElem`（普通 `_Borrow` 不能下标）。
+   `config_parse` 即如此，`main` 直接传 `&_Const ctext[0]`，无需栈拷贝。
 4. 返回字面量的函数标 `_Nonnull`（如 `mime_for_path`），否则传给 `_Nonnull` 形参报 nullable。
 5. `include/platform/*.hbs` 引用 `include/` 同级头用 `../x.hbs`（不是 `../include/x.hbs`）。
 6. 集成脚本对并发请求只能 `wait $cpids`（裸 `wait` 会等永不退出的服务器进程）。
