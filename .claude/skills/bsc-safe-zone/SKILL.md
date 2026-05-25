@@ -41,6 +41,36 @@ _Safe void f(uint8_t *buf, size_t i, uint8_t v) {
 
 `_Unsafe stmt;` (single statement, no braces) is often the right shape.
 
+## `_Unsafe` Blocks Must Carry a Justification Comment
+
+Every `_Unsafe` block (or statement) needs an inline comment stating *why* `_Safe`
+is insufficient. This makes the `_Unsafe` seams auditable — reviewers can verify
+each escape is legitimate, and future maintainers can tell whether a given escape
+could be eliminated if the compiler improves.
+
+```c
+// _Unsafe: variadic C function — cannot be declared _Safe
+_Unsafe { fprintf(stderr, "error: %s\n", msg); }
+
+// _Unsafe: preprocessor macro — cannot be declared _Safe
+_Unsafe { SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY); }
+
+// _Unsafe: cross-struct pointer cast (sockaddr_in -> sockaddr)
+_Unsafe { if (bind(fd, (struct sockaddr*)(void*)&_Mut addr, sizeof(addr)) < 0) ... }
+
+// _Unsafe: __move_to_raw / __take_from_raw (ownership bypass builtins)
+_Unsafe { ctx.config = (const Config* _Nonnull)__move_to_raw(cfg); }
+
+// _Unsafe: void* type erasure across thread boundary (non-trivial pointee)
+_Unsafe { struct ServerCtx* ctx = (struct ServerCtx*)ctx_raw; }
+
+// _Unsafe: raw malloc/realloc/free — safe_malloc_array cannot handle types with _Owned fields
+_Unsafe { r->routes_data = (Route*)malloc(cap * sizeof(Route)); }
+```
+
+Do not write `_Unsafe { ... }` without a comment. If you cannot articulate why
+the block needs `_Unsafe`, it probably does not need it.
+
 ## 1. Overview
 
 Designate code regions where the compiler enforces memory safety. Default context is `_Unsafe` (standard C compatibility). Use `_Safe` to opt in to strict checking.
@@ -73,6 +103,7 @@ In `_Safe` zones:
 ### Pointer operations
 - **No `&` address-of** — use `&_Const` or `&_Mut` to take borrows. Exception: taking the address of a function is allowed.
 - **No raw pointer dereference** (`*rawptr`, `rawptr->field`) — `_Owned` and `_Borrow` pointer dereference is OK
+- **`T *_Owned _ArrayElem` / `T *_Borrow _ArrayElem` subscript is allowed** (`p[i]` reads and writes) — no `_Unsafe` needed. This is an exception to the general rule that pointer arithmetic is forbidden in `_Safe`: the compiler permits `[]` on `_ArrayElem` pointers even though `p + i` and `p++` remain errors.
 - **No pointer category casts** — no casting between `_Owned`/`_Borrow`/raw pointers, no pointer-to-integer or integer-to-pointer casts. Exception: `T *_Owned` can be explicitly cast to `void *_Owned`.
 - **No casts between pointers of different pointed-to types**
 - **`nullptr` required** — `NULL` is forbidden in safe zones; use `nullptr` to initialize or compare pointers

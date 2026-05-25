@@ -1,8 +1,6 @@
 #include "thread_pool.h"
 #include <unistd.h>
 
-// _Safe declarations with _Borrow for pthread functions.
-// pthread_create kept in _Unsafe: _Borrow→void* type erasure is forbidden.
 _Safe int pthread_mutex_init(pthread_mutex_t* _Borrow mutex, const pthread_mutexattr_t* _Nullable attr);
 _Safe int pthread_mutex_lock(pthread_mutex_t* _Borrow mutex);
 _Safe int pthread_mutex_unlock(pthread_mutex_t* _Borrow mutex);
@@ -11,6 +9,8 @@ _Safe int pthread_cond_init(pthread_cond_t* _Borrow cond, const pthread_condattr
 _Safe int pthread_cond_signal(pthread_cond_t* _Borrow cond);
 _Safe int pthread_cond_broadcast(pthread_cond_t* _Borrow cond);
 _Safe int pthread_cond_destroy(pthread_cond_t* _Borrow cond);
+_Safe int pthread_create(pthread_t* _Borrow thread, const pthread_attr_t* _Nullable attr,
+                         void* (*start)(void*), void* _Borrow arg);
 _Safe int pthread_join(pthread_t thread, void** _Nullable retval);
 _Safe int close(int fd);
 
@@ -46,12 +46,8 @@ _Safe int thread_pool_start(struct ThreadPool* _Borrow tp, int n_workers, ConnHa
     tp->ctx = ctx;
     pthread_mutex_init(&_Mut tp->mtx, nullptr);
     pthread_cond_init(&_Mut tp->not_empty, nullptr);
-    // _Unsafe: pthread_create — _Borrow→void* type erasure (ThreadPool is non-trivial)
-    // Also arg1 expects pthread_t* _Borrow but &tp->workers[i] is raw pthread_t*
-    _Unsafe {
-        for (int i = 0; i < n_workers; i++)
-            if (pthread_create(&tp->workers[i], NULL, tp_worker, (void*)(struct ThreadPool*)tp) != 0) return -1;
-    }
+    for (int i = 0; i < n_workers; i++)
+        if (pthread_create(&_Mut tp->workers[i], nullptr, tp_worker, &_Mut *tp) != 0) return -1;
     return 0;
 }
 

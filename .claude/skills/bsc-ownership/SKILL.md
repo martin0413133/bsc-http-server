@@ -115,6 +115,44 @@ _Safe void foo(void) {
   ```
 - **Array elements**: cannot store `_Owned` pointers in arrays, including structs with `_Owned` members as array elements. The same restriction applies to the pointee type of `T *_Owned _ArrayElem` (the inner element type cannot have `_Owned` members)
 
+### Fallback for owned-field array types: raw `T*` with `_Unsafe`
+
+When `T *_Owned _ArrayElem` is rejected because `T` contains `_Owned` fields
+(e.g. a `Header` with `cstring` fields), the fallback is a raw `T*` field with
+manual `malloc`/`realloc`/`free` entirely in `_Unsafe`. Each `_Unsafe` block
+must carry a justification comment.
+
+```c
+// cstring has _Owned _ArrayElem buf -> Header "contains owned type"
+typedef struct Header { cstring name; cstring value; } Header;
+
+typedef struct Router {
+    Route* routes_data;      // raw T* — _Owned _ArrayElem rejected for Route
+    size_t routes_len;
+    size_t routes_cap;
+} Router;
+
+// All allocation, access, and deallocation wrapped in _Unsafe:
+
+static inline _Safe void router_routes_init(Router* _Borrow r, size_t cap) {
+    // _Unsafe: raw malloc — safe_malloc_array cannot handle Route (contains _Owned fields)
+    _Unsafe {
+        r->routes_data = (Route*)malloc(cap * sizeof(Route));
+        if (!r->routes_data) bsc_bad_alloc_handler(cap * sizeof(Route));
+    }
+    r->routes_cap = cap;
+}
+
+_Safe void Router_free(Router r) {
+    for (size_t i = 0; i < r.routes_len; i++) {
+        // _Unsafe: nullable raw pointer subscript (routes_data is raw Route*)
+        _Unsafe { Route_free(r.routes_data[i]); }
+    }
+    // _Unsafe: raw free — safe_free_array cannot handle Route (contains _Owned fields)
+    _Unsafe { free((void*)r.routes_data); }
+}
+```
+
 ### Nullable `_Owned` pointers
 - `int *_Owned _Nullable p = nullptr;` allows null owned pointers
 - `__take_from_raw` and `__move_to_raw` preserve Nullability
