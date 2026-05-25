@@ -1,0 +1,64 @@
+#include "../../include/platform/runtime.hbs"
+#include "../../include/platform/net.hbs"
+#include "../../include/platform/log.hbs"
+#include "../../include/platform/thread_pool.hbs"
+#include "../../include/handler.hbs"
+#include "../../include/http_request.hbs"
+#include "../../include/http_response.hbs"
+#include "../../include/str_util.hbs"
+
+#define REQ_BUF 8192
+
+// 进程级共享只读上下文（按值持有；无 owned 数据）。
+static struct ServerCtx g_ctx;
+
+// 处理一个连接：读请求、处理、响应、关闭。运行在 worker 线程。
+_Safe void handle_conn(int fd, void* _Nonnull ctx_raw) {
+    struct ServerCtx* ctx = _Unsafe((struct ServerCtx*)ctx_raw);
+    char buf[REQ_BUF] = {0};
+    ssize_t n = net_recv(fd, buf, REQ_BUF);
+    if (n <= 0) { net_close(fd); return; }
+
+    // 从原始 ctx 重建借用
+    const struct Config* _Borrow cfg = _Unsafe(&_Const ctx->config);
+    const struct Router* _Borrow rt  = _Unsafe(&_Const ctx->router);
+
+    struct Response resp = handle_request(cfg, rt, buf);
+    size_t wlen = 0;
+    char *_Owned _ArrayElem wire = response_serialize(&_Const resp, &_Mut wlen);
+
+    // 分段发送：用下标从 owned 报文读入栈缓冲（避免 _Borrow/_Owned -> raw 转换）
+    size_t off = 0;
+    while (off < wlen) {
+        char out[4096] = {0};
+        size_t m = 0;
+        while (off < wlen && m < sizeof(out)) { out[m] = wire[off]; m++; off++; }
+        if (net_send_all(fd, out, m) != 0) { break; }
+    }
+    safe_free_array(wire);
+    log_request("conn", "", resp.status);   // 简单请求日志；状态码足够诊断
+    response_free(resp);                     // 无 _Owned struct 自动析构，显式释放 resp
+    net_close(fd);
+}
+
+_Safe int server_run(const struct Config* _Borrow config, const struct Router* _Borrow router) {
+    int listen_fd = net_listen(config->port, 128);
+    if (listen_fd < 0) { return -1; }
+    // 把 config/router 拷入进程级 static 上下文（纯 struct，按值拷贝）
+    _Unsafe {
+        g_ctx.config = *config;
+        g_ctx.router = *router;
+    }
+    void* _Nonnull ctxp = _Unsafe((void* _Nonnull)&g_ctx);
+
+    struct ThreadPool pool = {0};
+    struct ThreadPool* _Nonnull poolp = _Unsafe((struct ThreadPool* _Nonnull)&pool);
+    if (thread_pool_start(poolp, config->threads, handle_conn, ctxp) != 0) { return -1; }
+    log_msg("cc_httpd listening");
+    for (;;) {
+        int client = net_accept(listen_fd);
+        if (client < 0) { continue; }
+        thread_pool_submit(poolp, client);
+    }
+    return 0;
+}
