@@ -1,0 +1,36 @@
+#include "bishengc_safety.hbs"
+#include <stdio.h>
+#include "../src/str_util.cbs"
+#include "../src/http_request.cbs"
+#include "../src/http_response.cbs"
+#include "../src/router.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+_Safe struct Response hello(const struct Request* _Borrow req) {
+    (void)req;
+    return response_with_cstr(200, "OK", "text/plain", "hi");
+}
+
+_Safe int main(void) {
+    struct Router rt = router_new();
+    router_add(&_Mut rt, "GET", "/hello", hello);
+
+    struct Request a = request_parse("GET /hello HTTP/1.1\r\n\r\n");
+    Handler h = router_match(&_Const rt, &_Const a);
+    CHECK(h != nullptr, "match found");
+    request_free(a);
+
+    struct Request b = request_parse("GET /nope HTTP/1.1\r\n\r\n");
+    CHECK(router_match(&_Const rt, &_Const b) == nullptr, "no match");
+    request_free(b);
+
+    struct Request c = request_parse("POST /hello HTTP/1.1\r\n\r\n");
+    CHECK(router_match(&_Const rt, &_Const c) == nullptr, "method mismatch");
+    request_free(c);
+
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_router OK\n");}
+    return 0;
+}

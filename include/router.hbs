@@ -1,0 +1,22 @@
+#ifndef CC_ROUTER_HBS
+#define CC_ROUTER_HBS
+#include <stddef.h>
+#include "../include/http_request.hbs"
+#include "../include/http_response.hbs"
+
+#define MAX_ROUTES 32
+
+typedef struct Response (*Handler)(const struct Request* _Borrow req);
+
+struct Route { char method[8]; char path[256]; Handler handler; };
+
+struct Router { struct Route routes[MAX_ROUTES]; size_t n_routes; };
+
+_Safe struct Router router_new(void);
+_Safe void   router_add(struct Router* _Borrow r, const char* _Nonnull method,
+                        const char* _Nonnull path, Handler h);
+_Safe Handler _Nullable router_match(const struct Router* _Borrow r, const struct Request* _Borrow req);
+
+// 拒绝含 ".." 段的路径（穿越）。true = 安全。
+_Safe _Bool path_is_safe(const char* _Nonnull path);
+#endif

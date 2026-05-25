@@ -1,0 +1,19 @@
+#include "bishengc_safety.hbs"
+#include <stdio.h>
+#include "../src/str_util.cbs"
+#include "../src/http_request.cbs"
+#include "../src/http_response.cbs"
+#include "../src/router.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+_Safe int main(void) {
+    CHECK(path_is_safe("/index.html"), "normal ok");
+    CHECK(path_is_safe("/css/style.css"), "subdir ok");
+    CHECK(!path_is_safe("/../etc/passwd"), "dotdot rejected");
+    CHECK(!path_is_safe("/a/../../b"), "embedded dotdot rejected");
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_path_guard OK\n");}
+    return 0;
+}
