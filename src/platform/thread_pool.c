@@ -1,9 +1,18 @@
 #include "thread_pool.h"
 #include <unistd.h>
 
-// <pthread.h> declares pthread_* functions with raw pointers (e.g. pthread_mutex_t*).
-// We cannot add _Safe declarations with _Borrow — the compiler rejects the conflicting
-// redeclaration. So pthread calls stay in _Unsafe blocks using the system declarations.
+// _Safe declarations with _Borrow for pthread functions.
+// pthread_create kept in _Unsafe: _Borrow→void* type erasure is forbidden.
+_Safe int pthread_mutex_init(pthread_mutex_t* _Borrow mutex, const pthread_mutexattr_t* _Nullable attr);
+_Safe int pthread_mutex_lock(pthread_mutex_t* _Borrow mutex);
+_Safe int pthread_mutex_unlock(pthread_mutex_t* _Borrow mutex);
+_Safe int pthread_mutex_destroy(pthread_mutex_t* _Borrow mutex);
+_Safe int pthread_cond_init(pthread_cond_t* _Borrow cond, const pthread_condattr_t* _Nullable attr);
+_Safe int pthread_cond_signal(pthread_cond_t* _Borrow cond);
+_Safe int pthread_cond_broadcast(pthread_cond_t* _Borrow cond);
+_Safe int pthread_cond_destroy(pthread_cond_t* _Borrow cond);
+_Safe int pthread_join(pthread_t thread, void** _Nullable retval);
+_Safe int close(int fd);
 
 // C-ABI worker callback — runs in raw pthread context.
 static void* tp_worker(void* arg) {
@@ -35,49 +44,38 @@ _Safe int thread_pool_start(struct ThreadPool* _Borrow tp, int n_workers, ConnHa
     tp->stop = 0;
     tp->handler = handler;
     tp->ctx = ctx;
-    // _Unsafe: <pthread.h> raw-pointer declarations conflict with _Borrow redeclaration
+    pthread_mutex_init(&_Mut tp->mtx, nullptr);
+    pthread_cond_init(&_Mut tp->not_empty, nullptr);
+    // _Unsafe: pthread_create — _Borrow→void* type erasure (ThreadPool is non-trivial)
+    // Also arg1 expects pthread_t* _Borrow but &tp->workers[i] is raw pthread_t*
     _Unsafe {
-        pthread_mutex_init(&tp->mtx, NULL);
-        pthread_cond_init(&tp->not_empty, NULL);
-        for (int i = 0; i < n_workers; i++) {
-            // + _Borrow→void* conversion forbidden (type erasure for thread arg)
-            if (pthread_create(&tp->workers[i], NULL, tp_worker, (void*)&_Mut *tp) != 0) return -1;
-        }
+        for (int i = 0; i < n_workers; i++)
+            if (pthread_create(&tp->workers[i], NULL, tp_worker, (void*)(struct ThreadPool*)tp) != 0) return -1;
     }
     return 0;
 }
 
 _Safe void thread_pool_submit(struct ThreadPool* _Borrow tp, struct ConnJob job) {
-    // _Unsafe: <pthread.h> raw-pointer declarations conflict with _Borrow redeclaration
-    _Unsafe { pthread_mutex_lock(&tp->mtx); }
+    pthread_mutex_lock(&_Mut tp->mtx);
     if (tp->count == TP_QUEUE_CAP) {
-        _Unsafe { pthread_mutex_unlock(&tp->mtx); }
+        pthread_mutex_unlock(&_Mut tp->mtx);
         close(job.fd);
         return;
     }
     tp->queue[tp->tail] = job;
     tp->tail = (tp->tail + 1) % TP_QUEUE_CAP;
     tp->count++;
-    // _Unsafe: <pthread.h> raw-pointer declarations conflict with _Borrow redeclaration
-    _Unsafe {
-        pthread_cond_signal(&tp->not_empty);
-        pthread_mutex_unlock(&tp->mtx);
-    }
+    pthread_cond_signal(&_Mut tp->not_empty);
+    pthread_mutex_unlock(&_Mut tp->mtx);
 }
 
 _Safe void thread_pool_shutdown(struct ThreadPool* _Borrow tp) {
-    // _Unsafe: <pthread.h> raw-pointer declarations conflict with _Borrow redeclaration
-    _Unsafe { pthread_mutex_lock(&tp->mtx); }
+    pthread_mutex_lock(&_Mut tp->mtx);
     tp->stop = 1;
-    _Unsafe {
-        pthread_cond_broadcast(&tp->not_empty);
-        pthread_mutex_unlock(&tp->mtx);
-    }
-    for (int i = 0; i < tp->n_workers; i++) {
-        _Unsafe { pthread_join(tp->workers[i], NULL); }
-    }
-    _Unsafe {
-        pthread_mutex_destroy(&tp->mtx);
-        pthread_cond_destroy(&tp->not_empty);
-    }
+    pthread_cond_broadcast(&_Mut tp->not_empty);
+    pthread_mutex_unlock(&_Mut tp->mtx);
+    for (int i = 0; i < tp->n_workers; i++)
+        pthread_join(tp->workers[i], nullptr);
+    pthread_mutex_destroy(&_Mut tp->mtx);
+    pthread_cond_destroy(&_Mut tp->not_empty);
 }
