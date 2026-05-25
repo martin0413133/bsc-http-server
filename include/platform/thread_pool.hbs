@@ -1,0 +1,29 @@
+#ifndef CC_THREAD_POOL_HBS
+#define CC_THREAD_POOL_HBS
+#include <stddef.h>
+#include <pthread.h>
+
+typedef void (*ConnHandler)(int client_fd, void* _Nonnull ctx);
+
+#define TP_QUEUE_CAP 256
+#define TP_MAX_WORKERS 64
+
+struct ThreadPool {
+    pthread_t workers[TP_MAX_WORKERS];
+    int n_workers;
+    int queue[TP_QUEUE_CAP];
+    int head, tail, count;
+    int stop;
+    pthread_mutex_t mtx;
+    pthread_cond_t not_empty;
+    ConnHandler handler;
+    void* ctx;
+};
+
+// 初始化并启动 worker。成功返回 0。
+_Safe int  thread_pool_start(struct ThreadPool* _Nonnull tp, int n_workers, ConnHandler handler, void* _Nonnull ctx);
+// 入队一个客户端 fd（队满则关闭并丢弃，避免阻塞 accept 循环）。
+_Safe void thread_pool_submit(struct ThreadPool* _Nonnull tp, int client_fd);
+// 置位 stop 并 join 所有 worker。
+_Safe void thread_pool_shutdown(struct ThreadPool* _Nonnull tp);
+#endif
