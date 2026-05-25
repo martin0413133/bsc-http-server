@@ -1,0 +1,28 @@
+#include "../../include/platform/fs.hbs"
+#include <stdio.h>
+
+_Safe char *_Owned _ArrayElem _Nullable fs_read_file(const char* _Nonnull path, size_t* _Borrow out_len) {
+    *out_len = 0;
+    char *_Owned _ArrayElem _Nullable result = nullptr;
+    _Unsafe {
+        FILE* f = fopen(path, "rb");
+        if (f == NULL) { return nullptr; }       // result 仍为 nullptr，无泄漏
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz < 0) { fclose(f); return nullptr; }
+        // safe_malloc_array 是 _Safe 函数，可在 _Unsafe 块内调用
+        char *_Owned _ArrayElem buf = safe_malloc_array((size_t)sz + 1, (char)0);
+        size_t pos = 0;
+        char chunk[4096];
+        size_t n;
+        while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) {
+            for (size_t i = 0; i < n && pos < (size_t)sz; i++) { buf[pos] = chunk[i]; pos++; }
+        }
+        fclose(f);
+        buf[pos] = '\0';
+        *out_len = pos;
+        result = buf;        // 把 buf 移入 result
+    }
+    return result;
+}
