@@ -1,0 +1,19 @@
+#include "bishengc_safety.hbs"
+#include <stdio.h>
+#include "../src/str_util.cbs"
+#include "../src/mime.cbs"
+
+static int fails = 0;
+#define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
+
+_Safe int main(void) {
+    CHECK(cbuf_eq(mime_for_path("a/index.html"), "text/html"), "html");
+    CHECK(cbuf_eq(mime_for_path("style.css"), "text/css"), "css");
+    CHECK(cbuf_eq(mime_for_path("app.js"), "application/javascript"), "js");
+    CHECK(cbuf_eq(mime_for_path("pic.png"), "image/png"), "png");
+    CHECK(cbuf_eq(mime_for_path("noext"), "application/octet-stream"), "default");
+    CHECK(cbuf_eq(mime_for_path("weird.xyz"), "application/octet-stream"), "unknown");
+    if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
+    _Unsafe{printf("test_mime OK\n");}
+    return 0;
+}

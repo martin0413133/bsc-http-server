@@ -1,0 +1,20 @@
+#include "../include/mime.hbs"
+#include "../include/str_util.hbs"
+
+_Safe const char* _Nonnull mime_for_path(const char* _Nonnull path) {
+    size_t n = cstr_len(path);
+    size_t dot = n;                       // n 表示「未找到」
+    for (size_t i = 0; i < n; i++) { if (path[i] == '.') { dot = i; } }
+    if (dot == n) { return "application/octet-stream"; }
+    const char* ext = path + dot + 1;     // 指针算术在 _Safe 中合法
+    if (cbuf_eq(ext, "html") || cbuf_eq(ext, "htm")) { return "text/html"; }
+    if (cbuf_eq(ext, "css"))  { return "text/css"; }
+    if (cbuf_eq(ext, "js"))   { return "application/javascript"; }
+    if (cbuf_eq(ext, "json")) { return "application/json"; }
+    if (cbuf_eq(ext, "png"))  { return "image/png"; }
+    if (cbuf_eq(ext, "jpg") || cbuf_eq(ext, "jpeg")) { return "image/jpeg"; }
+    if (cbuf_eq(ext, "gif"))  { return "image/gif"; }
+    if (cbuf_eq(ext, "svg"))  { return "image/svg+xml"; }
+    if (cbuf_eq(ext, "txt"))  { return "text/plain"; }
+    return "application/octet-stream";
+}
