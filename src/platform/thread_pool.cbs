@@ -1,26 +1,28 @@
 #include "../../include/platform/thread_pool.hbs"
 #include <unistd.h>
 
+// pthread 回调，签名须匹配 `void* (*)(void*)`，故**非 _Safe**——整个函数体本就处于非安全
+// 上下文（void*->T* 转换、原始 tp-> 解引用、&tp->mtx、pthread 调用均合法），无需 _Unsafe 包裹。
 static void* tp_worker(void* arg) {
-    _Unsafe {
-        struct ThreadPool* tp = (struct ThreadPool*)arg;
-        for (;;) {
-            pthread_mutex_lock(&tp->mtx);
-            while (tp->count == 0 && !tp->stop) {
-                pthread_cond_wait(&tp->not_empty, &tp->mtx);
-            }
-            if (tp->stop && tp->count == 0) { pthread_mutex_unlock(&tp->mtx); break; }
-            int fd = tp->queue[tp->head];
-            tp->head = (tp->head + 1) % TP_QUEUE_CAP;
-            tp->count--;
-            pthread_mutex_unlock(&tp->mtx);
-            tp->handler(fd, tp->ctx);
+    struct ThreadPool* tp = (struct ThreadPool*)arg;
+    for (;;) {
+        pthread_mutex_lock(&tp->mtx);
+        while (tp->count == 0 && !tp->stop) {
+            pthread_cond_wait(&tp->not_empty, &tp->mtx);
         }
-        return NULL;
+        if (tp->stop && tp->count == 0) { pthread_mutex_unlock(&tp->mtx); break; }
+        int fd = tp->queue[tp->head];
+        tp->head = (tp->head + 1) % TP_QUEUE_CAP;
+        tp->count--;
+        pthread_mutex_unlock(&tp->mtx);
+        tp->handler(fd, tp->ctx);
     }
+    return NULL;
 }
 
 _Safe int thread_pool_start(struct ThreadPool* _Nonnull tp, int n_workers, ConnHandler handler, void* _Nonnull ctx) {
+    // 需 _Unsafe：tp 是裸指针（`tp->` 解引用禁于安全区）+ `&tp->mtx`/`&tp->workers[i]` 取址 +
+    // pthread_mutex_init/cond_init/create 系统调用。
     _Unsafe {
         if (n_workers > TP_MAX_WORKERS) { n_workers = TP_MAX_WORKERS; }
         tp->n_workers = n_workers;
@@ -36,6 +38,7 @@ _Safe int thread_pool_start(struct ThreadPool* _Nonnull tp, int n_workers, ConnH
 }
 
 _Safe void thread_pool_submit(struct ThreadPool* _Nonnull tp, int client_fd) {
+    // 需 _Unsafe：裸 tp-> 解引用 + `&tp->mtx` 取址 + pthread mutex/cond + close 系统调用。
     _Unsafe {
         pthread_mutex_lock(&tp->mtx);
         if (tp->count == TP_QUEUE_CAP) {            // 队满：关闭并丢弃以免阻塞 accept
@@ -52,6 +55,7 @@ _Safe void thread_pool_submit(struct ThreadPool* _Nonnull tp, int client_fd) {
 }
 
 _Safe void thread_pool_shutdown(struct ThreadPool* _Nonnull tp) {
+    // 需 _Unsafe：裸 tp-> 解引用 + `&tp->mtx`/`&tp->workers[i]` 取址 + pthread join/destroy 系统调用。
     _Unsafe {
         pthread_mutex_lock(&tp->mtx);
         tp->stop = 1;

@@ -1,9 +1,10 @@
 #include "../../include/platform/log.hbs"
 #include <stdio.h>
 
+// log 接缝：唯一不安全操作是 fprintf（stdio FFI，安全区禁止 syscall/可变参 IO）。
 _Safe void log_request(const char* _Nonnull method, const char* _Nonnull path, int status) {
-    _Unsafe { fprintf(stderr, "%s %s -> %d\n", method, path, status); }
+    _Unsafe { fprintf(stderr, "%s %s -> %d\n", method, path, status); }   // fprintf 是 FFI
 }
 _Safe void log_msg(const char* _Nonnull msg) {
-    _Unsafe { fprintf(stderr, "%s\n", msg); }
+    _Unsafe { fprintf(stderr, "%s\n", msg); }                            // fprintf 是 FFI
 }

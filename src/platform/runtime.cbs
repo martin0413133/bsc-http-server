@@ -14,12 +14,14 @@ static struct ServerCtx g_ctx;
 
 // 处理一个连接：读请求、处理、响应、关闭。运行在 worker 线程。
 _Safe void handle_conn(int fd, void* _Nonnull ctx_raw) {
+    // 需 _Unsafe：void* -> 具体指针的转换在安全区被禁（线程池只能传 void* ctx）。
     struct ServerCtx* ctx = _Unsafe((struct ServerCtx*)ctx_raw);
     char buf[REQ_BUF] = {0};
     ssize_t n = net_recv(fd, buf, REQ_BUF);
     if (n <= 0) { net_close(fd); return; }
 
-    // 从原始 ctx 重建借用
+    // 需 _Unsafe：ctx 是裸指针，`ctx->` 解引用禁于安全区；这里从裸 ctx 重建只读借用，
+    // 之后 cfg/rt 在安全区内正常使用（借用寿命受 g_ctx 的进程级生命周期覆盖）。
     const struct Config* _Borrow cfg = _Unsafe(&_Const ctx->config);
     const struct Router* _Borrow rt  = _Unsafe(&_Const ctx->router);
 
@@ -44,13 +46,15 @@ _Safe void handle_conn(int fd, void* _Nonnull ctx_raw) {
 _Safe int server_run(const struct Config* _Borrow config, const struct Router* _Borrow router) {
     int listen_fd = net_listen(config->port, 128);
     if (listen_fd < 0) { return -1; }
-    // 把 config/router 拷入进程级 static 上下文（纯 struct，按值拷贝）
-    _Unsafe {
-        g_ctx.config = *config;
-        g_ctx.router = *router;
-    }
+    // 把 config/router 拷入进程级 static 上下文（纯 struct 按值拷贝）。
+    // 无需 _Unsafe：对全局结构体字段赋值、解引用只读借用 *config 读取，均为安全区合法操作。
+    g_ctx.config = *config;
+    g_ctx.router = *router;
+    // 需 _Unsafe：`&g_ctx` 取址 + 转 void*（要塞进线程池的 void* ctx 通道）。
     void* _Nonnull ctxp = _Unsafe((void* _Nonnull)&g_ctx);
 
+    // 需 _Unsafe：`&pool` 取址 + 转裸 ThreadPool*（线程要在借用作用域之外长期使用 pool，
+    // 故用裸指针而非借用更贴合语义）。
     struct ThreadPool pool = {0};
     struct ThreadPool* _Nonnull poolp = _Unsafe((struct ThreadPool* _Nonnull)&pool);
     if (thread_pool_start(poolp, config->threads, handle_conn, ctxp) != 0) { return -1; }

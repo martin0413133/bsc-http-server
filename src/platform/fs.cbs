@@ -4,6 +4,9 @@
 _Safe char *_Owned _ArrayElem _Nullable fs_read_file(const char* _Nonnull path, size_t* _Borrow out_len) {
     *out_len = 0;
     char *_Owned _ArrayElem _Nullable result = nullptr;
+    // 整块为文件 I/O FFI 接缝：fopen/fseek/ftell/fread/fclose 系统调用、原始 `FILE*` 句柄、
+    // NULL 比较、fread 写入裸栈数组 chunk —— 安全区均禁止。块内的 safe_malloc_array 与
+    // buf[]/result 赋值本身是安全区合法的，只是与文件读取逻辑交织，故同处一块以保持可读。
     _Unsafe {
         FILE* f = fopen(path, "rb");
         if (f == NULL) { return nullptr; }       // result 仍为 nullptr，无泄漏

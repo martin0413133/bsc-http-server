@@ -5,7 +5,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+// POSIX socket 的 _Unsafe FFI 接缝。每个 _Unsafe 仅包裹真正需要它的操作——系统调用、
+// 原始指针 `&`/类型转换；安全区合法的部分（裸 char* 下标、指针算术、循环控制）留在外面。
+
 _Safe int net_listen(int port, int backlog) {
+    // 整块为 FFI，安全区均禁止：socket/setsockopt/bind/listen 系统调用 +
+    // memset + `&addr`/`&opt`(取址) + `(struct sockaddr*)` 原始指针转换。
     _Unsafe {
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd < 0) { return -1; }
@@ -23,29 +28,28 @@ _Safe int net_listen(int port, int backlog) {
 }
 
 _Safe int net_accept(int listen_fd) {
+    // 需 _Unsafe：accept 系统调用 + NULL 哨兵（NULL 仅安全区禁止）。
     _Unsafe { return accept(listen_fd, NULL, NULL); }
 }
 
 _Safe ssize_t net_recv(int fd, char* _Nonnull buf, size_t cap) {
-    _Unsafe {
-        if (cap == 0) { return -1; }
-        ssize_t n = recv(fd, buf, cap - 1, 0);
-        if (n < 0) { return -1; }
-        buf[n] = '\0';
-        return n;
-    }
+    if (cap == 0) { return -1; }
+    ssize_t n = -1;
+    _Unsafe { n = recv(fd, buf, cap - 1, 0); }   // 唯一需 _Unsafe 处：recv 系统调用
+    if (n < 0) { return -1; }
+    buf[n] = '\0';                               // 裸 char* 下标写——安全区合法，无需 _Unsafe
+    return n;
 }
 
 _Safe int net_send_all(int fd, const char* _Nonnull buf, size_t len) {
-    _Unsafe {
-        size_t sent = 0;
-        while (sent < len) {
-            ssize_t n = send(fd, buf + sent, len - sent, 0);
-            if (n <= 0) { return -1; }
-            sent += (size_t)n;
-        }
-        return 0;
+    size_t sent = 0;                             // 循环控制在安全区
+    while (sent < len) {
+        ssize_t n = -1;
+        _Unsafe { n = send(fd, buf + sent, len - sent, 0); }  // 唯一需 _Unsafe 处：send 系统调用
+        if (n <= 0) { return -1; }
+        sent += (size_t)n;
     }
+    return 0;
 }
 
-_Safe void net_close(int fd) { _Unsafe { close(fd); } }
+_Safe void net_close(int fd) { _Unsafe { close(fd); } }   // 需 _Unsafe：close 系统调用
