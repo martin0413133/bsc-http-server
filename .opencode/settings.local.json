@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash *)",
+      "Bash(command -v claude)",
+      "Read(//home/zly/bsc/llvm-project/build/bin/**)",
+      "Bash(~/bsc/llvm-project/build/bin/clang --version)",
+      "Read(//home/zly/bsc/llvm-project/libcbs/src/**)",
+      "Read(//home/zly/bsc/llvm-project/libcbs/**)",
+      "Read(//home/zly/bsc/httpx/**)",
+      "Read(//home/zly/bsc/llvm-project/build/projects/libcbs/**)"
+    ]
+  }
+}
