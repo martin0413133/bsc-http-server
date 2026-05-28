@@ -1,6 +1,6 @@
 ---
 name: bsc-ownership
-description: "BiSheng C 所有权系统。当你需要理解 _Owned 指针、移动语义、_Owned struct、析构函数、RAII、_Public/_Private 访问、_Nullable、safe_malloc/safe_free、所有权转移规则或 _Owned 与 traits/联合体/函数指针的结合使用时，使用此技能。"
+description: "BiSheng C 所有权系统。当你需要理解 _Owned 指针、移动语义、_Nullable、safe_malloc/safe_free、所有权转移规则或 _Owned 与 _ArrayElem/联合体/函数指针的结合使用时，使用此技能。"
 ---
 
 # BiSheng C 所有权技能
@@ -159,10 +159,6 @@ _Safe void Router_free(Router r) {
 - `_Owned` 指针可以作为 `if`/`while`/`do-while`/`for`/三目运算符的条件，但**不能**用于 `switch`
 - 允许隐式 `_Owned` -> `_Bool` 转换（不消耗所有权）
 
-### `_Owned` 与 `_Trait` 类型
-- 隐式转换：如果 `S` 实现了 `T`，则 `S *_Owned` 可以转换为 `_Trait T *_Owned`
-- 可以通过 `_Trait T *_Owned` 指针调用 trait 方法
-
 ### 函数指针匹配
 - 函数指针类型必须与 `_Owned` 注解完全匹配——不能将有 `_Owned` 参数的函数赋值给无 `_Owned` 参数的指针，反之亦然
 
@@ -178,102 +174,17 @@ _Safe void Router_free(Router r) {
 
 反向转换 `void *_Owned` → `T *_Owned` 在变量仍然拥有内存时是允许的（在 `_Unsafe` 中），**但转换后结果结构体的内部 `_Owned` 成员并不拥有其指向的内容**。在读取之前，你必须要么重新赋值它们，要么将其视为原始指针。示例：`struct S *_Owned sp = _Unsafe((struct S *_Owned)memAlloc(...));` 之后，在 `sp->p` 被重新赋值之前，将 `sp->p` 作为 `int *_Owned` 读取是编译错误。
 
-### `_Owned` 与泛型
-在泛型函数中，当 `_Owned` 修饰泛型类型参数 T（作为 `T _Owned` 或 `_Owned T`）时，`_Owned` 应用于完整的类型 T。当 T 实例化为 `int*` 时，结果是 `int* _Owned`。
-
 ## 6. _Safe / _Unsafe 上下文
 
 - `_Safe` 函数使用 `safe_malloc`/`safe_free`；原始的 `malloc`/`free` 需要 `_Unsafe` 块
 - 没有 `_Safe` 或 `_Unsafe` 的函数默认是非安全的
 
-## 7. 拥有的结构体（RAII）
+## 7. 作为堆缓冲区字段的原始指针
 
-```c
-#include "bishengc_safety.hbs"
-#include <stdio.h>
+普通的 `T *_Owned` **禁止数组下标**（`ptr[i]`）。对于需要索引的堆分配数组，你有两个选择：
 
-_Owned struct Buffer {
-_Private:                    // _Private 是默认访问修饰符
-    char *_Owned data;
-    int len;
-_Public:
-    int cap;
-    ~Buffer(Buffer this) {   // 析构函数——在作用域结束时自动调用
-        safe_free((void *_Owned)this.data);  // _Owned 成员必须在此释放
-    }
-};
-
-Buffer Buffer::new(int capacity, char init) {
-    return (Buffer){ .data = safe_malloc(init), .len = 0, .cap = capacity };
-}
-
-_Safe int main(void) {
-    {
-        Buffer buf = Buffer::new(256, '\0');
-    }   // ~Buffer 在此自动调用
-    {
-        Buffer buf1 = Buffer::new(128, '\0');
-        Buffer buf2 = buf1;  // 移动：buf1 已失效，只调用 ~Buffer(buf2)
-    }
-    return 0;
-}
-```
-
-### 7.1 拥有的结构体规则
-
-- `_Owned struct` 作为一个整体具有移动语义
-- 析构函数语法：在结构体体内的 `~TypeName(TypeName this) { ... }`
-- 变量超出作用域时自动调用析构函数（如果未被移动）
-- **用户不能显式调用析构函数**——只有编译器调用它
-- 如果没有定义析构函数，编译器会提供一个默认的
-- 结构体内部的 `_Owned` 指针成员**必须**在析构函数中手动释放
-- **访问修饰符**：`_Private`（默认）和 `_Public`——只有结构体体内的成员/函数可以访问 `_Private` 成员；扩展函数和外部代码只能访问 `_Public` 成员
-- **禁止部分移动**：在作用域结束时，`_Owned struct` 必须要么完全拥有（没有移出任何东西），要么作为一个整体完全移出。移动单个 `_Owned` 成员而保留结构体会导致编译错误
-- 全局 `_Owned struct` 变量不会调用其析构函数（包括函数局部 `static`）
-
-### 7.2 陷阱：作为联合体替代的标签结构体带有隐藏成本
-
-当你用包含所有变体字段的 `_Owned struct` 替换 C 联合体时（一种常见模式，因为 BSC 没有安全的 `_Owned` 联合体），**每个实例都承担所有变体的析构函数成本**，而不仅仅是活跃的那个。
-
-```c
-// 替换 C 联合体 { Object*; Array*; double; ... }
-_Owned struct ValueValue {
-_Public:
-    String         string;
-    double         number;
-    Object* _Owned object;   // 每个实例都堆分配
-    Array*  _Owned array;    // 每个实例都堆分配
-    int            boolean;
-
-    ~ValueValue(ValueValue this) {
-        free_Object(this.object);   // 总是运行，即使对于非 Object 值
-        free_Array(this.array);
-    }
-};
-```
-
-需要注意的后果：
-
-- 构造会通过 `safe_malloc` 分配**所有**堆指针（每个变体指针字段一个），即使对于原始变体如 `JSONNull` 或 `JSONBoolean`。
-- 析构会对**所有**它们调用 `safe_free`——因此任何跨实例的别名（特别是通过 `clone` 路径或 `safe_swap` 模式）会使释放加倍。
-- 每个值的内存成本是恒定的，但**在容器中会成倍增加**（`Vec<ValueValue>` 中的 1000 个 null 仍然分配 1000 个 Object + 1000 个 Array）。
-
-**设计时要考虑的缓解措施**（交叉参考 `/bsc-design` 规则 7 和 §2 "替换 C 联合体"）：
-
-- 对于真正异构的变体，使用基于 trait 的和类型
-- 延迟初始化（仅当设置变体时才分配内部堆内存）
-- 接受成本并用 FIXME 显式记录
-
-当调试使用此模式的代码中的 double-free 时，最可能的原因是 `clone` 或 `safe_swap` 在全字段结构体上引入的字段级别名——参见 `/bsc-common-mistakes` §8。
-
-### 7.3 作为堆缓冲区字段的原始指针（RawVec 惯用语）
-
-普通的 `T *_Owned` **禁止数组下标**（`ptr[i]`）。对于需要索引的堆分配数组，你有两个安全选择：
-
-1. **`T *_Owned _ArrayElem`**（当缓冲区确实是 T 的统一数组时首选）——支持 `[]` 和指针算术，保持在 `_Safe` 中。参见 §8。
-2. **原始 `T *` 字段**（下面的 RawVec 惯用语）——当缓冲区被重新解释（混合记录的字节缓冲区）、由非 BSC API（C 库的 `malloc`）分配或不适合 `_ArrayElem` 的统一元素模型时需要。
-
-`_Owned struct` 析构函数在两种情况下都处理释放。
+1. **`T *_Owned _ArrayElem`**（当缓冲区确实是 T 的统一数组时首选）——支持 `[]` 和指针算术，保持在 `_Safe` 中。
+2. **原始 `T *` 字段**——当缓冲区被重新解释（混合记录的字节缓冲区）、由非 BSC API（C 库的 `malloc`）分配或不适合 `_ArrayElem` 的统一元素模型时需要。
 
 ```c
 // 错误——_Owned ptr 禁止下标；this->data[i] = v 是编译错误
@@ -282,16 +193,11 @@ struct BadBuf {
     size_t   used;
 };
 
-// 正确——原始 T* 字段；结构体析构函数拥有分配
-_Owned struct GoodBuf {
-_Public:
+// 正确——原始 T* 字段；拥有结构体负责释放
+struct GoodBuf {
     uint8_t *data;   // 原始指针——索引可以工作
     size_t   used;
     size_t   cap;
-
-    ~GoodBuf(GoodBuf this) {
-        _Unsafe { free(this.data); }   // 手动释放；结构体是拥有者
-    }
 };
 ```
 
@@ -303,25 +209,6 @@ _Safe void buf_write(GoodBuf *_Borrow _Nonnull this, uint8_t v) {
     this->used += 1;
 }
 ```
-
-对于普通 `struct`（非 `_Owned`）包装器，模式是相同的：原始 `T *` 字段，所有解引用周围有 `_Unsafe`，在配对的销毁函数（而非析构函数）中显式 `free`。与 `T *_Owned` 的区别是有意且重要的：使用原始 `T *` 时，结构体本身是逻辑拥有者；字段只是一个游标。
-
-### 7.4 `_Owned struct` 必须在文件作用域定义
-
-`_Owned struct S { ... };` 定义只能出现在翻译单元（文件）作用域——与 `_Trait` 定义和函数定义在同一级别。它们**不能**在函数体或块内定义（这与标准 C 不同，标准 C 允许普通 `struct` 在局部定义）。
-
-```c
-// 正确——文件作用域
-_Owned struct Person { _Public: int age; ~Person(Person this) {} };
-
-_Safe int main(void) {
-    Person p = {.age = 18};
-    // _Owned struct S { };  // 错误：不能在函数作用域中定义
-    return 0;
-}
-```
-
-编译器错误：`_Owned struct cannot be defined in function scope; move the definition to file scope`。
 
 ## 8. `_ArrayElem`：可索引数组的拥有指针
 
@@ -367,7 +254,7 @@ _Safe int main(void) {
 
 **`_Safe` / `_Unsafe` 互操作**：兼容性规则将 `_Owned _ArrayElem` 和 `_Borrow _ArrayElem` 视为**完整的限定词**——`_Safe` 重新声明可以向未注解的 `_Unsafe` 参数添加 `_Owned _ArrayElem`，但你不能跨声明将 `_Owned` "升级"为 `_Owned _ArrayElem` 或在 `_Owned` 和 `_Owned _ArrayElem` 之间移动。
 
-### 何时优先选择 `_Owned _ArrayElem` 而非 RawVec 惯用语（§7.3）
+### 何时优先选择 `_Owned _ArrayElem` 而非原始指针字段
 
 - 缓冲区是一种元素类型 `T` 的统一数组，并且你将其索引为这样的数组 → `_Owned _ArrayElem`。
 - 缓冲区被视为原始字节、被重新解释或来自非 BSC 分配器 → 保持原始 `T *` 字段 + `_Unsafe`（RawVec）。

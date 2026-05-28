@@ -93,27 +93,6 @@ _Borrow int* r = &_Const x;       // 错误 — _Borrow 不是类型
 **返回 BSC 代码前自检**：如果你写了 `_Owned T*` 或 `_Borrow T*`，
 重写为 `T *_Owned`。模式始终是 `T *_Owned`。
 
-## 项目代码风格（强制）
-
-本项目不使用 libcbs 标准库（String、Vec 等）。使用自定义 C 风格实现。
-
-### 类型定义
-
-- **禁用 `_Owned struct`**。所有类型使用 `typedef struct { ... } TypeName;`
-- 每个类型提供显式 `_free()` 函数手工管理生命周期。**绝不依赖析构函数。**
-- 禁用泛型（`<T>` 语法）。每种类型单独定义。
-
-```c
-// 正确: plain struct + 显式 _free
-typedef struct Foo { cstring name; int count; } Foo;
-_Safe void Foo_free(Foo f) {
-    cstring_free(f.name);
-}
-
-// 错误: _Owned struct
-_Owned struct Foo { _Public: cstring name; ~Foo(Foo this) { ... } };
-```
-
 ### 堆内存管理
 
 - 堆缓冲区使用 `_Owned _ArrayElem` 指针跟踪所有权（仅限简单元素类型如 `char`）
@@ -139,21 +118,10 @@ typedef struct Request {
 
 ### 函数调用风格
 
-- **禁用成员函数**（`.` 调用语法）。全部使用自由函数。
 - 可变借用：`func_name(&_Mut s, args)`
 - 不可变借用：`func_name(&_Const s, args)` 或 `func_name(s, args)`（s 已是 borrow 指针）
 - 所有权转移：`func_name(s)` 按值传递，消费实参
 
-```c
-// 正确: 自由函数
-cstring_push(&_Mut s, 'h');
-size_t n = cstring_len(&_Const s);
-cstring_free(s);
-
-// 错误: 成员函数调用
-s.push('h');
-size_t n = s.length();
-```
 
 ### 安全区分层
 

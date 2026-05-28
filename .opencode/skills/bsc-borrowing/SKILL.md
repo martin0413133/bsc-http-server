@@ -88,8 +88,6 @@ Uses that extend NLL: function calls `use(p)`, `return p`, dereference `*p`, mem
 - Cannot be global variables or union members
 - `_Owned` and `_Borrow` cannot coexist on same pointer: `int *_Owned _Borrow` is illegal
 - No indexing (`p[i]`) and no pointer arithmetic (`p + n`, `p++`) on **plain** borrow pointers. For an array-element borrow, use `_Borrow _ArrayElem` (see §11) — that variant supports `[]`, `+`, `-`, `+=`, `-=`, `++`, `--`
-- Cannot use `_Borrow` pointer type as a generic type argument
-- No `_Trait` impl for borrow types; no member functions for borrow types
 - Cannot take borrow of a struct that itself contains borrow members
 - Globals: in safe zones, only immutable borrows (`&_Const`) allowed; no mutable borrows of globals
 - String literals: `&_Mut "hello"` is forbidden; `&_Mut * "hello"` is forbidden
@@ -112,8 +110,7 @@ Uses that extend NLL: function calls `use(p)`, `return p`, dereference `*p`, mem
 
 ## 7. Type Conversions
 
-- **Trait upcasting**: explicit cast required; no implicit downcasting from trait to concrete
-- **`T *_Borrow` → `void *_Borrow`**: **implicit** when `T` is a trivial data type (no pointer fields, not an `_Owned struct`); otherwise the conversion is **forbidden**, even with an explicit cast
+- **`T *_Borrow` → `void *_Borrow`**: **implicit** when `T` is a trivial data type (no pointer fields); otherwise the conversion is **forbidden**, even with an explicit cast
   ```c
   struct S { int *ptr; };
   int a = 0; struct S s = {.ptr = nullptr};

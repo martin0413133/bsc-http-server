@@ -1,6 +1,6 @@
 ---
 name: bsc-design
-description: "BiSheng C design and architecture decisions. Load this Skill BEFORE writing a plan, proposal, or implementation that involves any non-trivial BSC change — including: new modules or APIs, new structs (especially _Owned struct), new functions with _Owned/_Borrow parameters, refactors that change ownership flow, adding features to existing types, choosing where the _Safe/_Unsafe boundary goes, deciding between value types and *_Owned pointers, member-function vs free-function organization, union-replacement strategies, or destructor design. Use this Skill at PLANNING time, not after the plan is written. Skip only for: typo fixes, comment edits, single-line bug fixes that don't change types or signatures."
+description: "BiSheng C design and architecture decisions. Load this Skill BEFORE writing a plan, proposal, or implementation that involves any non-trivial BSC change — including: new modules or APIs, new functions with _Owned/_Borrow parameters, refactors that change ownership flow, adding features to existing types, choosing where the _Safe/_Unsafe boundary goes, or deciding between value types and *_Owned pointers. Use this Skill at PLANNING time, not after the plan is written. Skip only for: typo fixes, comment edits, single-line bug fixes that don't change types or signatures."
 ---
 
 # BiSheng C Design Skill
@@ -11,7 +11,7 @@ porting existing C.
 
 ## 1. Rules of Thumb (read this first)
 
-Eight rules to consult when designing any BSC API. If you only remember one thing,
+Six rules to consult when designing any BSC API. If you only remember one thing,
 remember **Rule 2**.
 
 ### Rule 1 — Return values, borrow arguments
@@ -120,36 +120,11 @@ val.validate(&_Mut schema);                     // mut borrow #2 — conflicts
 val.validate(&_Mut schema);   // now OK
 ```
 
-### Rule 5 — Destructors own, functions move
-`_Owned struct` destructors fire **automatically** on scope exit. Don't write explicit
-`free_*(ptr)` functions unless the type is heap-allocated and held by a raw pointer
-(i.e. the destructor can't reach it).
 
-```c
-_Owned struct Config {
-    String name;     // ~String fires automatically
-    Vec<int> values; // ~Vec fires automatically
 
-    ~Config(Config this) {
-        // usually EMPTY — sub-field destructors run on their own
-    }
-};
-```
 
-### Rule 6 — Members for dispatch, free functions for everything else
-Use `Type::method(...)` when (a) the function logically belongs to the type, (b) you
-want `this->method()` dot-syntax at call sites, or (c) you need trait dispatch.
-Otherwise, free functions are simpler and compose better.
 
-```c
-// Member: belongs to the type, reads naturally
-_Safe size_t String::length(const String* _Borrow this);
-
-// Free: utility, no natural "owner"
-_Safe String json_parse_file(String filename);
-```
-
-### Rule 7 — Pick the unsafe seam deliberately
+### Rule 5 — Pick the unsafe seam deliberately
 Every BSC library has at least one `_Unsafe` seam. Place it at the **boundary** where
 BSC's model doesn't match reality:
 
@@ -163,7 +138,7 @@ nullability tracking keeps the call site `_Safe`). See Rule 8.
 
 Never put the seam in the middle of business logic.
 
-### Rule 8 — Prefer `_Nonnull`; reach for `_Nullable` only when "absent" is real
+### Rule 6 — Prefer `_Nonnull`; reach for `_Nullable` only when "absent" is real
 
 `_Owned` and `_Borrow` default to `_Nonnull`. Keep them that way unless the API genuinely
 has a no-result/optional/absent case to represent. `_Nullable` forces every use site to
@@ -195,9 +170,7 @@ _Safe void render(const Canvas *_Borrow _Nullable c, const Frame *_Borrow _Nulla
 Changing a pointer's nullability (Nonnull ↔ Nullable) on an existing API is a **breaking
 change** — every caller's null-check assumption shifts. Decide at design time, not patch time.
 
-> For compile-time nullability tracking mechanics and null-check patterns, see `bsc-nullability` Skill.
 
----
 
 ## 2. Designing Types
 
@@ -256,7 +229,7 @@ _Owned struct FileHandle {
 
 ---
 
-## 3. Designing APIs
+## 2. Designing APIs
 
 ### Value-in, value-out vs. borrow-in, borrow-out
 
@@ -296,24 +269,6 @@ dies at scope exit.
    cast through a raw pointer inside a tight `_Unsafe` block. Document why. (Parson's
    `dotget_value` does this.)
 
-### Member function layout
-
-```c
-// Declare in .hbs
-_Safe RetType TypeName::method(TypeName* _Borrow this, ArgT arg);
-
-// Define in .cbs — same signature
-_Safe RetType TypeName::method(TypeName* _Borrow this, ArgT arg) {
-    ...
-}
-
-// Call
-obj->method(arg);     // sugar for TypeName::method(obj, arg)
-```
-
-For `_Safe` member functions, `this` is **always** a `_Borrow` (const or mut) or the
-value type (for constructors). Never raw `T*`.
-
 ### Constructor pattern
 
 BSC has no special constructor syntax. Use `Type::new` (and variants `with_capacity`,
@@ -330,7 +285,7 @@ _Safe Config Config::from_file(String path);
 
 ---
 
-## 4. Designing Ownership Flow
+## 3. Designing Ownership Flow
 
 ### Where ownership lives
 
@@ -405,7 +360,7 @@ address remains valid after the setup function returns.
 
 ---
 
-## 5. Designing the `_Safe` / `_Unsafe` boundary
+## 4. Designing the `_Safe` / `_Unsafe` boundary
 
 ### Pick the boundary at design time, not during debugging
 
@@ -442,17 +397,12 @@ Not legitimate for:
 
 ---
 
-## 6. Anti-Patterns
+## 5. Anti-Patterns
 
 ### Anti-pattern: `_Unsafe` all the way down
 Symptom: every function is `_Unsafe`. You're writing C with a .cbs extension.
 Fix: mark the public API `_Safe` and push the `_Unsafe` parts into blocks inside each
 function. The checker still helps you at the boundaries.
-
-### Anti-pattern: God struct
-Symptom: one `_Owned struct` with 15 fields, most unused in most code paths.
-Fix: split into smaller structs composed via `_Owned` fields. Destructors compose;
-borrows compose; design stays modular.
 
 ### Anti-pattern: returning raw `T*` instead of `T *_Borrow`
 Symptom: a lookup returns `T*` (raw) instead of `T *_Borrow`, forcing callers into
@@ -460,11 +410,6 @@ Symptom: a lookup returns `T*` (raw) instead of `T *_Borrow`, forcing callers in
 Fix: if the function always succeeds, return `T *_Borrow`. If it can fail, return
 `T *_Borrow _Nullable` — compile-time nullability tracking keeps callers `_Safe` while
 representing the miss case.
-
-### Anti-pattern: destructor that does too much
-Symptom: destructor reaches into unrelated subsystems, calls logging, modifies global state.
-Fix: destructors should only release resources owned by `this`. Side effects belong
-in explicit methods the caller invokes.
 
 ### Anti-pattern: designing for C first, then "porting"
 Symptom: you wrote a C-style API (`JSON_Value* parse(const char*)`) and are now
@@ -474,55 +419,16 @@ signatures drive the implementation.
 
 ---
 
-## 7. A Worked Example
 
-A simple key-value store, designed BSC-first:
 
-```c
-// In kvstore.hbs
-#include "string.hbs"
-#include "vec.hbs"
-
-_Owned struct KVEntry {
-    String key;
-    String value;
-};
-
-_Owned struct KVStore {
-_Public:
-    Vec<KVEntry> entries;
-
-    ~KVStore(KVStore this) {
-        // empty — Vec<KVEntry> auto-destructs, which auto-destructs each KVEntry,
-        // which auto-destructs each String.
-    }
-};
-
-_Safe KVStore KVStore::new(void);
-_Safe void KVStore::set(KVStore* _Borrow this, String key, String value);
-_Safe const String* _Borrow KVStore::get(const KVStore* _Borrow this, const String* _Borrow key);
-_Safe size_t KVStore::len(const KVStore* _Borrow this);
-```
-
-Design notes:
-- **Rule 1:** `new()` returns by value, mutating methods take `_Borrow this`, read methods take `const _Borrow this`.
-- **Rule 3:** `KVStore` is a value type — no `*_Owned` needed at the API.
-- **Rule 5:** Destructor is empty; field destructors handle everything.
-- **Rule 7:** The `_Unsafe` seam is only needed inside `set` if we want to dedupe
-  (lookup-then-insert on a linear scan is fine `_Safe`; a hash probe would need it).
-
----
-
-## 8. Quick Reference
+## 6. Quick Reference
 
 | Question | Answer |
 |---|---|
 | Should I return `T` or `T *_Owned`? | `T` for small + non-null + local use; `*_Owned` for large, nullable, or container-stored |
 | Should I take `T`, `T *_Owned`, or `T *_Borrow`? | `_Borrow` for read, mut-`_Borrow` for modify, value/`_Owned` for consume |
 | Should this be `_Safe` or `_Unsafe`? | `_Safe` unless you can't — then wrap `_Unsafe` blocks inside |
-| Do I need a destructor body? | Only if there's a raw pointer, a non-memory resource, or custom cleanup logic |
-| Should this be a member or a free function? | Member if it logically belongs to the type or you want dot-syntax; free otherwise |
-| Union or trait sum type? | Tagged struct for small variants; trait for wildly-sized variants |
+
 | Can I share ownership? | Use `Rc<T>` from stdlib-advanced; don't invent sharing schemes |
 
 Before you write a single line of BSC: sketch the types first, annotate who owns

@@ -1,13 +1,13 @@
 ---
 name: bsc-overview
-description: "BiSheng C language overview. When you need to understand what BiSheng C is, its file types (.cbs/.hbs), compiler usage, or get an overview of all BSC features and keywords, use this Skill."
+description: "BiSheng C language overview. When you need to understand what BiSheng C is, its file types (.cbs/.hbs), compiler usage, safe zones (_Safe/_Unsafe), and ownership (_Owned/_Borrow), use this Skill."
 ---
 
 # BiSheng C Overview Skill
 
 ## 1. What is BiSheng C
 
-BiSheng C (BSC) is a **superset of C** with Rust-inspired memory safety, traits, generics, and async/await. All valid C code is valid BSC code.
+BiSheng C (BSC) is a **superset of C** with Rust-inspired memory safety and async/await. All valid C code is valid BSC code.
 
 - Source files: `.cbs` (or `.c` compiled with `-x bsc`)
 - Header files: `.hbs` (or `.h` compiled with `-x bsc`)
@@ -27,11 +27,8 @@ BiSheng C (BSC) is a **superset of C** with Rust-inspired memory safety, traits,
 
 | Feature | Keywords | Description |
 |---------|----------|-------------|
-| Member functions | `TypeName::method`, `this`, `This` | Attach methods to any type (struct, primitive, etc.) |
-| Generics | `<T>`, `<T, int N>` | Compile-time monomorphization, constant generics, type aliases |
-| Traits | `_Trait`, `_Impl`, `This*` | Interface abstraction with vtable dynamic dispatch |
 | Operator overloading | `__attribute__((operator OP))` | Overload operators for user-defined types |
-| Ownership | `_Owned`, `_ArrayElem`, `_Nullable`, `_Nonnull`, `_Public` | Move semantics, RAII destructors, compile-time memory safety |
+| Ownership | `_Owned`, `_ArrayElem`, `_Nullable`, `_Nonnull`, `_Public` | Move semantics, compile-time memory safety |
 | Borrowing | `_Borrow`, `_ArrayElem`, `&_Const`, `&_Mut` | Non-owning references with lifetime enforcement |
 | Nullability | `_Nullable`, `_Nonnull`, `nullptr` | Compile-time null-safety checking |
 | Safe zones | `_Safe`, `_Unsafe` | Compiler-enforced memory safety regions |
@@ -39,27 +36,15 @@ BiSheng C (BSC) is a **superset of C** with Rust-inspired memory safety, traits,
 | Coroutines | `_Async`, `_Await`, `Future` | Stackless coroutines with poll-based execution |
 | Scheduler | `Scheduler::init/spawn/run/destroy` | Thread-pool concurrent task execution |
 | constexpr | `constexpr`, `_Static_assert`, `if constexpr` | Compile-time evaluation and type-specialized branches |
-| Type traits | `is_integral<T>()`, `is_pointer<T>()`, etc. | Compile-time type classification |
-| Standard library | `Vec<T>`, `String`, `Option<T>`, `Result<T>` | Safe containers with RAII |
+| Type classification | `is_integral<T>()`, `is_pointer<T>()`, etc. | Compile-time type queries |
 
 ## 3. Quick Syntax Summary
 
 | Feature | Syntax |
 |---------|--------|
 | Source/header | `.cbs` / `.hbs` |
-| Member function | `RetType TypeName::method(TypeName* this, ...)` |
-| Static member | `RetType TypeName::method(...)` (no this) |
-| Generic function | `T func<T>(T arg)` |
-| Generic struct | `struct S<T> { T field; };` |
-| Constant generic | `struct A<T, int N> { T data[N]; };` |
-| Type alias (generic) | `typedef Alias<T> = OldType<T>;` |
-| Conditional type alias | `conditional<C, T, F>` (from `bsc_conditional.hbs`) |
-| Trait definition | `_Trait Name { RetType method(This* this); };` |
-| Trait impl | `_Impl _Trait Name for TypeName;` |
-| Trait pointer | `_Trait Name* ptr = &value;` |
 | Operator overload | `__attribute__((operator+)) RetType func(...)` |
 | Owned pointer | `T *_Owned` (**not** `_Owned T*` — qualifier goes after `*`) |
-| Owned struct | `_Owned struct S { _Public: ...; ~S(S this) {...} };` (must be at file scope) |
 | Owned array pointer | `T *_Owned _ArrayElem` — `_Owned` pointer that supports `[]` (see `bsc-ownership`) |
 | Immutable borrow | `const T *_Borrow ref = &_Const value;` (**not** `_Borrow T*`) |
 | Mutable borrow | `T *_Borrow ref = &_Mut value;` |
@@ -71,15 +56,11 @@ BiSheng C (BSC) is a **superset of C** with Rust-inspired memory safety, traits,
 | Async function | `_Async RetType func(...) { ... }` |
 | Await | `T result = _Await asyncFunc();` |
 | constexpr if | `if constexpr (expr) { ... }` |
-| Destructor | `~TypeName(TypeName this) { ... }` (inside `_Owned struct`) |
 | ensure_init | `void f(int *__attribute__((ensure_init)) out)` |
 | assume init | `_Unsafe { __assume_initialized(&x); }` |
 
 ## 4. Skill Index
 
-> For member functions, see `bsc-member-function` Skill
-> For generics, see `bsc-generic` Skill
-> For traits, see `bsc-trait` Skill
 > For operator overloading, see `bsc-operator-overloading` Skill
 > For ownership, see `bsc-ownership` Skill
 > For borrowing, see `bsc-borrowing` Skill

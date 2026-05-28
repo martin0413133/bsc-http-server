@@ -1,6 +1,6 @@
 ---
 name: bsc-safe-zone
-description: "BiSheng C 安全区域。当你需要理解 _Safe 函数、_Safe 块、_Unsafe 逃逸块、安全区域限制（初始化、指针、类型转换、枚举/浮点转换、++/-- 语义）、trait/泛型安全、成员函数安全或混合安全/不安全模式时，使用此技能。"
+description: "BiSheng C 安全区域。当你需要理解 _Safe 函数、_Safe 块、_Unsafe 逃逸块、安全区域限制（初始化、指针、类型转换、枚举/浮点转换、++/-- 语义）或混合安全/不安全模式时，使用此技能。"
 ---
 
 # BiSheng C 安全区域技能
@@ -102,8 +102,8 @@ _Safe void process(const int *_Borrow v) {
 
 | 转换 | 在 `_Safe` 中 | 在 `_Unsafe` 中 |
 |---|---|---|
-| `T *_Borrow` → `void *_Borrow`（T 是平凡数据：无指针，不是 `_Owned struct`） | **可以**（隐式） | 可以 |
-| `T *_Borrow` → `void *_Borrow`（T 有指针字段 / 是 `_Owned struct`） | **禁止**（即使有显式转换） | 禁止 |
+| `T *_Borrow` → `void *_Borrow`（T 是平凡数据：无指针） | **可以**（隐式） | 可以 |
+| `T *_Borrow` → `void *_Borrow`（T 有指针字段） | **禁止**（即使有显式转换） | 禁止 |
 | `void *_Borrow` → `T *_Borrow` | **禁止**——需要显式转换，必须在 `_Unsafe` 中 | 可以（显式转换） |
 | `T *_Borrow _ArrayElem` → `T *_Borrow` | 可以（隐式） | 可以 |
 | `T *_Borrow` → `T *_Borrow _ArrayElem` | 禁止 | 禁止 |
@@ -145,51 +145,13 @@ _Safe {
 }
 ```
 
-#### `_Owned struct` 必须使用聚合设计初始化——绝不能使用裸声明符
-
-一个 `_Owned struct` 总是包含 `_Owned` 字段（直接或通过 `String`/`Vec` 成员）。裸声明符在安全区域中总是被拒绝：
+不能在构造后重新赋值 `_Owned` 指针字段；改用 `safe_swap`。初始化后，对 `_Owned` 字段进行赋值会被拒绝：
 
 ```c
-// 错误——"uninitialized declarator is forbidden in the safe zone"
-Request r;
-
-// 正确——通过聚合设计初始化提供所有字段
-Request r = {
-    .method  = String::new(),
-    .path    = String::new(),
-    .headers = Vec<Header>::new(),
-    .body    = String::new(),
-    .ok      = 0
-};
-```
-
-所有 `_Owned` 子字段必须在大括号列表内进行移动初始化。你不能先构造结构体再赋值字段——见下面的直接规则。
-
-#### 构造后不能重新赋值 `_Owned` 结构体字段；改用 `safe_swap`
-
-在 `_Owned struct` 初始化后，对 `_Owned` 字段进行赋值会被拒绝：
-
-```c
-Config c = { .name = String::new(), ... };
-String newname = build_name();
-c.name = newname;   // 错误——"assign to part of _Owned value"
-```
-
-两种合法的替代方案：
-
-**A — 在构造时移动**（当值在结构体构建之前已知时首选）：
-
-```c
-String name = build_name();
-Config c = { .name = name, ... };  // `name` 被移入；之后 `name` 已失效
-```
-
-**B — 构造后替换使用 `safe_swap`**（来自 `bishengc_safety.hbs`）：
-
-```c
-String newname = build_name();
-safe_swap(&_Mut c.name, &_Mut newname);
-// 原地交换；旧值落入 `newname`，在作用域结束时析构
+int *_Owned p = safe_malloc(42);
+int *_Owned q = safe_malloc(0);
+safe_swap(&_Mut p, &_Mut q);
+// 原地交换
 ```
 
 `safe_swap<T>(T* _Borrow left, T* _Borrow right)` 交换两个拥有的值而不进行直接的赋值语句，安全区域规则允许这样做。
@@ -230,13 +192,7 @@ _Safe void foo(void) {
   ```
 - **Switch**：`case`/`default` 只能在 `switch` 后的第一级块中；该第一级块中不能有变量声明
 
-## 4. Trait 和泛型安全规则
-
-- 声明为 `_Safe` 的 `_Trait` 函数要求实现函数也是 `_Safe`；如果 trait 函数不是 `_Safe`，实现可以是 `_Safe`（编译器会警告）
-- `_Safe` 泛型函数：所有实例化都进行安全检查
-- 成员函数也可以用 `_Safe`/`_Unsafe` 修饰，规则与全局函数相同
-
-## 5. 混合模式声明（_Safe/_Unsafe 重载）
+## 4. 混合模式声明（_Safe/_Unsafe 重载）
 
 同一个函数可以同时有 `_Safe` 和 `_Unsafe` 声明：
 
@@ -248,24 +204,11 @@ _Safe int* _Owned foo(int* _Owned p);  // 安全版本：添加 _Owned
 - `_Safe` 声明可以**添加** `_Owned`、`_Borrow`、`_Owned _ArrayElem` 或 `_Borrow _ArrayElem` 到原始指针参数/返回值。`_Owned _ArrayElem` 和 `_Borrow _ArrayElem` 作为**完整单元**添加——你不能跨声明将普通 `_Owned` 升级为 `_Owned _ArrayElem`。
 - 必须**不删除** `_Unsafe` 声明中存在的限定词，也不能将 `_Owned` 与 `_Borrow` 互换（反之亦然）。**返回类型**上的标准 C 限定词（`const`、`volatile` 等）也必须保留；**参数类型**上的为了兼容性会被剥离。
 - 在安全上下文中，只有 `_Safe` 重载可以调用。在不安全上下文中，当类型匹配时，优先选择 `_Safe` 版本。
-- **泛型函数不支持混合模式**
 - 如果函数有多个相同安全级别的声明，它们必须一致
 
-## 6. 函数指针规则
+## 5. 函数指针规则
 
-- `_Safe` 函数指针只能从有 `_Safe` 声明的函数赋值
-- `_Unsafe` 函数指针可以从 `_Safe` 或 `_Unsafe` 函数赋值（如果类型兼容）
-
-```c
-_Safe void safe_fn(void);
-_Unsafe void unsafe_fn(void);
-
-_Safe void (*sp)(void) = nullptr;
-sp = safe_fn;    // 可以
-sp = unsafe_fn;  // 错误：没有可用的 _Safe 声明
-```
-
-## 7. 完整示例
+## 6. 完整示例
 
 ```c
 #include <stdio.h>

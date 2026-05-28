@@ -1,6 +1,6 @@
 ---
 name: bsc-safe-zone
-description: "BiSheng C safe zones. When you need to understand _Safe functions, _Safe blocks, _Unsafe escape blocks, safe zone restrictions (initialization, pointers, type casts, enum/float conversions, ++/-- semantics), trait/generic safety, member function safety, or mixed safe/unsafe patterns, use this Skill."
+description: "BiSheng C safe zones. When you need to understand _Safe functions, _Safe blocks, _Unsafe escape blocks, safe zone restrictions (initialization, pointers, type casts, enum/float conversions, ++/-- semantics), or mixed safe/unsafe patterns, use this Skill."
 ---
 
 # BiSheng C Safe Zones Skill
@@ -112,8 +112,8 @@ In `_Safe` zones:
 
 | Conversion | In `_Safe` | In `_Unsafe` |
 |---|---|---|
-| `T *_Borrow` → `void *_Borrow` (T is trivial data: no pointers, not `_Owned struct`) | **OK** (implicit) | OK |
-| `T *_Borrow` → `void *_Borrow` (T has pointer fields / is `_Owned struct`) | **Forbidden** (even with explicit cast) | Forbidden |
+| `T *_Borrow` → `void *_Borrow` (T is trivial data: no pointers) | **OK** (implicit) | OK |
+| `T *_Borrow` → `void *_Borrow` (T has pointer fields) | **Forbidden** (even with explicit cast) | Forbidden |
 | `void *_Borrow` → `T *_Borrow` | **Forbidden** — explicit cast required, must be in `_Unsafe` | OK (explicit cast) |
 | `T *_Borrow _ArrayElem` → `T *_Borrow` | OK (implicit) | OK |
 | `T *_Borrow` → `T *_Borrow _ArrayElem` | Forbidden | Forbidden |
@@ -155,57 +155,16 @@ _Safe {
 }
 ```
 
-#### `_Owned struct` must use aggregate designated init — never a bare declarator
-
-An `_Owned struct` always contains `_Owned` fields (directly or through `String`/`Vec`
-members). A bare declarator is always rejected in a safe zone:
+#Cannot reassign an `_Owned` pointer field after construction; use `safe_swap` instead. After initialization, assigning to an `_Owned` field is rejected:
 
 ```c
-// ERROR — "uninitialized declarator is forbidden in the safe zone"
-Request r;
-
-// CORRECT — all fields provided via aggregate designated init
-Request r = {
-    .method  = String::new(),
-    .path    = String::new(),
-    .headers = Vec<Header>::new(),
-    .body    = String::new(),
-    .ok      = 0
-};
+int *_Owned p = safe_malloc(42);
+int *_Owned q = safe_malloc(0);
+safe_swap(&_Mut p, &_Mut q);
+// swaps in place
 ```
 
-All `_Owned` sub-fields must be move-initialized inside the brace list. You cannot
-construct the struct first and assign fields afterward — see the rule immediately below.
-
-#### Cannot reassign an `_Owned` struct field after construction; use `safe_swap` instead
-
-After an `_Owned struct` is initialized, assigning to an `_Owned` field is rejected:
-
-```c
-Config c = { .name = String::new(), ... };
-String newname = build_name();
-c.name = newname;   // ERROR — "assign to part of _Owned value"
-```
-
-Two legal alternatives:
-
-**A — move at construction** (preferred when the value is known before the struct is built):
-
-```c
-String name = build_name();
-Config c = { .name = name, ... };  // `name` is moved in; `name` is dead afterward
-```
-
-**B — `safe_swap` for post-construction replacement** (from `bishengc_safety.hbs`):
-
-```c
-String newname = build_name();
-safe_swap(&_Mut c.name, &_Mut newname);
-// swaps in place; old value lands in `newname` and destructs at scope end
-```
-
-`safe_swap<T>(T* _Borrow left, T* _Borrow right)` exchanges two owned values without a
-direct assignment statement, which the safe-zone rules permit.
+`safe_swap<T>(T* _Borrow left, T* _Borrow right)` exchanges two owned values without a direct assignment statement, which the safe-zone rules permit.
 
 ### Increment/decrement (`++`/`--`)
 `++` and `--` are **allowed**, but their result type is `void`. You can use them as standalone statements, but you cannot use the expression's value.
@@ -243,13 +202,7 @@ _Safe void foo(void) {
   ```
 - **Switch**: `case`/`default` only in first-level block after `switch`; no variable declarations in that first-level block
 
-## 4. Trait and Generic Safety Rules
-
-- `_Trait` functions declared `_Safe` require implementation functions to also be `_Safe`; if trait function is not `_Safe`, implementation can be `_Safe` (compiler warns)
-- `_Safe` generic functions: all instantiations are checked for safety
-- Member functions can also be `_Safe`/`_Unsafe` modified with same rules as global functions
-
-## 5. Mixed-Mode Declarations (_Safe/_Unsafe overloading)
+## 4. Mixed-Mode Declarations (_Safe/_Unsafe overloading)
 
 The same function can have both `_Safe` and `_Unsafe` declarations:
 
@@ -261,24 +214,11 @@ _Safe int* _Owned foo(int* _Owned p);  // safe version: adds _Owned
 - `_Safe` declaration may **add** `_Owned`, `_Borrow`, `_Owned _ArrayElem`, or `_Borrow _ArrayElem` to raw pointer params/returns. `_Owned _ArrayElem` and `_Borrow _ArrayElem` are added as **whole units** — you cannot upgrade a plain `_Owned` to `_Owned _ArrayElem` across declarations.
 - Must **not remove** qualifiers present in the `_Unsafe` declaration, nor swap `_Owned` for `_Borrow` (and vice versa). Standard C qualifiers (`const`, `volatile`, …) on the **return type** must also be preserved; on **parameter types** they are stripped for compatibility.
 - In safe context, only `_Safe` overload is callable. In unsafe context, `_Safe` version preferred when types match.
-- **Generic functions do NOT support mixed mode**
 - If a function has multiple declarations of the same safety level, they must be consistent
 
-## 6. Function Pointer Rules
+## 5. Function Pointer Rules
 
-- `_Safe` function pointers can only be assigned from functions that have a `_Safe` declaration
-- `_Unsafe` function pointers can be assigned from either `_Safe` or `_Unsafe` functions (if types are compatible)
-
-```c
-_Safe void safe_fn(void);
-_Unsafe void unsafe_fn(void);
-
-_Safe void (*sp)(void) = nullptr;
-sp = safe_fn;    // ok
-sp = unsafe_fn;  // error: no _Safe declaration available
-```
-
-## 7. Complete Example
+## 6. Complete Example
 
 ```c
 #include <stdio.h>

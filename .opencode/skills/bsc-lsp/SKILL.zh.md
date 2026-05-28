@@ -41,13 +41,6 @@ line 18: Moved into consume()
 Live range: lines 10-18
 ```
 
-## 已知限制——何时回退到 Grep
-
-clangd 不完全理解 BSC 的成员函数调用语法（`obj->method(...)` 解析为 `T::method`）。这会影响：
-
-- 对成员函数使用 **findReferences** 通常只返回声明位置，缺少调用位置。在重命名/删除符号之前，务必使用 `Grep` 交叉检查。
-- **incomingCalls** 可能会报告"没有传入调用"，即使某函数明显是通过 `obj->method()` 调用的。使用 `Grep` 来发现调用位置。
-
 ## 经验法则
 
 - 使用 **LSP** 处理关于特定函数中特定变量的所有权/类型问题。

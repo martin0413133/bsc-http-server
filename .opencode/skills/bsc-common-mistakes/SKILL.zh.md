@@ -1,6 +1,6 @@
 ---
 name: bsc-common-mistakes
-description: "BiSheng C 常见错误和修复。当你遇到 BSC 编译错误、需要调试代码或想避免所有权、借用、安全区域、traits 或泛型的常见陷阱时，使用此技能。"
+description: "BiSheng C 常见错误和修复。当你遇到 BSC 编译错误、需要调试代码或想避免所有权、借用或安全区域的常见陷阱时，使用此技能。"
 ---
 
 # BiSheng C 常见错误技能
@@ -224,36 +224,15 @@ Live range: lines 21-21
 
 对于拥有的值，`hover` 还显示 `Moved into foo()` 及行号。这是移动后使用诊断应打印但没有打印的信息——LSP 填补了空白。
 
-## 4. Trait 错误
+## 4. 可空性错误
 
-### 4.1 非指针 trait 变量
-```c
-// _Trait Printable obj;       // 错误：仅指针形式
-_Trait Printable* obj = &val;  // 正确
-```
-
-### 4.2 缺少 `struct` 关键字
-```c
-// void S::method(S* this) { ... }               // 错误（除非使用 typedef）
-void struct S::method(struct S* this) { ... }     // 正确
-```
-
-### 4.3 `_Impl` 在方法定义之前
-```c
-// 先定义方法，然后是 _Impl
-void struct Circle::print(struct Circle* this) { ... }
-_Impl _Trait Printable for struct Circle;
-```
-
-## 5. 可空性错误
-
-### 5.1 可能为空的 `_Owned` 指针没有 `_Nullable`
+### 4.1 可能为空的 `_Owned` 指针没有 `_Nullable`
 ```c
 // int *_Owned p = nullptr;               // 错误：_Owned 默认为 Nonnull
 int *_Owned _Nullable p = nullptr;        // 正确
 ```
 
-### 5.2 未进行空检查就解引用可空指针
+### 4.2 未进行空检查就解引用可空指针
 ```c
 _Safe void f(int *_Borrow _Nullable p) {
     // *p = 10;                           // 错误：可空指针
@@ -261,7 +240,7 @@ _Safe void f(int *_Borrow _Nullable p) {
 }
 ```
 
-### 5.3 将可空指针传递给非空参数
+### 4.3 将可空指针传递给非空参数
 ```c
 _Safe void bar(int *_Borrow p) {}     // 非空参数
 _Safe void f(int *_Borrow _Nullable p) {
@@ -270,9 +249,9 @@ _Safe void f(int *_Borrow _Nullable p) {
 }
 ```
 
-## 6. 初始化错误
+## 5. 初始化错误
 
-### 6.1 使用未初始化的变量
+### 5.1 使用未初始化的变量
 ```c
 _Safe void f(void) {
     int x;
@@ -282,7 +261,7 @@ _Safe void f(void) {
 }
 ```
 
-### 6.2 数组元素逐个赋值不被计数
+### 5.2 数组元素逐个赋值不被计数
 ```c
 _Safe void f(void) {
     int arr[3];
@@ -294,7 +273,7 @@ _Safe void f(void) {
 }
 ```
 
-### 6.3 对未初始化变量取地址
+### 5.3 对未初始化变量取地址
 ```c
 _Safe void f(void) {
     int x;
@@ -304,9 +283,9 @@ _Safe void f(void) {
 }
 ```
 
-## 7. 异步错误
+## 6. 异步错误
 
-### 7.1 二元表达式中的 `_Await`
+### 6.1 二元表达式中的 `_Await`
 ```c
 // int result = _Await compute(1) + _Await compute(2);  // 错误
 int a = _Await compute(1);
@@ -314,18 +293,18 @@ int b = _Await compute(2);
 int result = a + b;
 ```
 
-### 7.2 同一参数列表中的多个 `_Await`
+### 6.2 同一参数列表中的多个 `_Await`
 ```c
 // f(_Await g(), _Await h());          // 错误：同一级别的多个 _Await
 int a = _Await g();
 f(a, _Await h());                      // 正确：预先计算一个
 ```
 
-## 8. 调试运行时内存错误
+## 7. 调试运行时内存错误
 
 当 BSC 代码编译干净但运行时出现 **double-free** 或 **use-after-free** 时，在怀疑编译器之前按以下排查流程进行。
 
-### 8.1 使用 valgrind 而非 gdb 来定位 double-free
+### 7.1 使用 valgrind 而非 gdb 来定位 double-free
 
 glibc 的 `free(): double free detected in tcache 2` 在 gdb 下只给你第二次 free 的堆栈跟踪。Valgrind 同时显示两次 FREE 和原始的 `malloc`，这才是你找到别名的根本原因所需要的。
 
@@ -335,7 +314,7 @@ valgrind --error-exitcode=1 --leak-check=no ./binary
 
 查找"Invalid read"/"Invalid free"报告。"Address X is N bytes inside a block of size M free'd"这行告诉你同一地址之前在哪里被释放，以及该次释放时的堆栈。
 
-### 8.2 在怀疑编译器之前排除测试顺序污染
+### 7.2 在怀疑编译器之前排除测试顺序污染
 
 如果某个函数在隔离环境（独立的可重现二进制）中正常工作，但在大型测试套件中在其他测试之后调用时失败，则错误是**状态污染**，而不是代码生成：
 
@@ -345,9 +324,9 @@ valgrind --error-exitcode=1 --leak-check=no ./binary
 
 重现方法：构建一个最小 `main`，在一个新进程中**仅调用失败的函数**。如果通过了，则错误是上下文相关的。
 
-### 8.3 在声称编译器 bug 之前检查去语法糖后的 AST（driver 模式）
+### 7.3 在声称编译器 bug 之前检查去语法糖后的 AST（driver 模式）
 
-大多数关于析构函数 double-free 的"编译器 bug"假设最终都是错误的。使用以下命令验证：
+大多数关于 double-free 的"编译器 bug"假设最终都是错误的。使用以下命令验证：
 
 ```bash
 clang -Xclang -ast-dump -fsyntax-only file.cbs -I./include
@@ -355,186 +334,25 @@ clang -Xclang -ast-dump -fsyntax-only file.cbs -I./include
 
 查找你怀疑的变量的 `varname_is_moved` 标志和 `if (!varname_is_moved) ~Type(varname)` IfStmt。如果编译器的机制完好，则错误在你的库的堆指针别名中。
 
-**不要为此使用 `clang -cc1 -fsyntax-only`**——它缺少系统包含，这会使每个 `_Owned struct` 在 AST 中虚假地变成"无效"。有关详细信息，请参见 `/bsc-compile` 技能 §6。
+**不要为此使用 `clang -cc1 -fsyntax-only`**——它缺少系统包含，这会使每个带 `_Owned` 字段的结构体在 AST 中虚假地变成"无效"。有关详细信息，请参见 `/bsc-compile` 技能 §6。
 
-### 8.4 常见的库级 double-free 原因
+### 7.4 常见的库级 double-free 原因
 
 当编译器在做正确的事情时，真正的原因通常是以下之一：
 
 - **标签结构体作为联合体的替代**：每个实例为每个变体携带一个堆指针，因此如果构造无意中共享了指针，两个实例可能别名。参见 `/bsc-design` 规则 7 和 §2 "替换 C 联合体"。
 - **别名指针之间的 `safe_swap`**：使双方都指向重叠所有权的交换。
 - **返回借用，而底层拥有的值被调用者移动**：借用变成悬垂。
-- **手动的 `_Unsafe` 字节赋值覆盖了 `_Owned` 槽，而没有析构先前的内容**：旧的堆指针泄漏（单个副本）或别名（如果它们仅被 `memmove` 移位）。
+- **手动的 `_Unsafe` 字节赋值覆盖了 `_Owned` 槽，而没有释放先前的内容**：旧的堆指针泄漏（单个副本）或别名（如果它们仅被 `memmove` 移位）。
 
-### 8.5 排查流程总结
+### 7.5 排查流程总结
 
 1. 在 valgrind 下重现 → 获取两个释放位置 + malloc 来源。
 2. 在隔离环境中测试 → 确认/否认测试顺序污染。
-3. Driver 模式 AST 转储 → 确认编译器析构函数插入正确。
+3. Driver 模式 AST 转储 → 确认编译器移动追踪正确。
 4. 然后才考虑编译器级别的错误。实际上，>90% 的 BSC 项目中的 double-free 追溯到库级别名，而非代码生成。
 
-### 8.6 已知编译器 bug：`if`/`while`/`for` 条件中的 `_Owned` 参数未被移动追踪
-
-BSC 析构函数去语法糖阶段（`SemaBSCDestructor.cpp::VisitCompoundStmt`）仅对**外层**类型为 `BinaryOperator`、`DeclStmt` 或 `CallExpr` 的语句运行移动追踪。当消耗 `_Owned` 参数的函数调用出现在 `if`/`while`/`for`/`switch` **条件内部**时，外层语句是 `IfStmt`（等），因此移动追踪被完全跳过。`is_moved` 标志永远不会被设为 1，析构函数在作用域退出时会在已释放的内存上触发 → double-free。
-
-**症状：** `free(): double free detected in tcache 2` 紧接在带有 `_Owned` 参数且包装在 `if` 条件中的函数调用之后。
-
-**最小重现（29 行）：**
-
-```c
-#include "bishengc_safety.hbs"
-#include <stdlib.h>
-
-_Owned struct Box {
-_Public:
-    int *_Owned data;
-    ~Box(Box this) {
-        _Unsafe { free((void*)__move_to_raw(this.data)); }
-    }
-};
-
-_Safe Box Box::new(void) {
-    Box b = { .data = safe_malloc(0) };
-    return b;
-}
-
-_Safe int consume(Box b) { return 1; }   /* 获取所有权 */
-
-int main(void) {
-    Box b = Box::new();
-    if (consume(b) == 1) { }  /* BUG：b 未被标记为已移动 → 在 } 处 double free */
-    return 0;
-}
-```
-
-**AST 证据**——使用 `clang -Xclang -ast-dump -fsyntax-only` 转储：
-- 工作模式（`int r = consume(b); if (r == 1) {}`）：AST 在调用后显示 `BinaryOperator '=' b_is_moved = 1`。
-- 有 bug 的模式（`if (consume(b) == 1) {}`）：没有 `b_is_moved = 1` 的赋值，只有初始的 `b_is_moved = 0` 和析构函数 `if (!b_is_moved)` 检查。
-
-**解决方法**——在测试之前将调用结果存储到局部变量中：
-
-```c
-// 不好——double free
-if (consume(owned_value) == 1) { ... }
-
-// 好——提取调用
-int result = consume(owned_value);
-if (result == 1) { ... }
-
-// 同样好——作为独立语句调用
-consume(owned_value);
-if (some_other_check) { ... }
-```
-
-**此 bug 适用于**：
-- `if (call(owned) ...)` 和 `if (... call(owned) ...)`
-- `while (call(owned) ...)`、`for (...; call(owned); ...)`
-- `switch (call(owned))`
-- 任何包含消耗 `_Owned` 参数的 `CallExpr` 的条件表达式
-
-**此 bug 不适用于**：
-- `T result = call(owned);` 后跟 `if (result ...)` ——DeclStmt 被检查
-- `call(owned);` 作为独立语句——CallExpr 被检查
-- `lhs = call(owned);` 作为顶层赋值——BinaryOperator 被检查
-
-**当你怀疑此 bug 时：** 将一个可疑调用点转换为解决方法形式。如果 double-free 消失，你就确认了。对同一作用域中的所有兄弟位置应用相同的解决方法。
-
-### 8.7 已知编译器 bug：`_Owned` 局部变量的析构函数在借用它的返回表达式之前触发
-
-析构函数去语法糖阶段将每个 `_Owned` 局部变量的析构函数 `IfStmt` 作为兄弟语句**在**作用域末尾的 `ReturnStmt` 之前发出。如果返回表达式是一个通过该局部变量的借用进行读取的调用（`return f(&_Const b, ...)`），则该调用运行在**已被析构的内存**上并返回错误的值。没有崩溃，没有警告——只是静默的损坏返回值。
-
-这与 §8.6 不同：那是在 `if`/`while` 条件中缺少移动标志赋值。即使没有涉及移动，这也是析构函数插入和 `ReturnStmt` 的操作数求值之间的顺序错误。
-
-**症状：** 一个包含 `_Owned` 局部变量和 `return f(...borrow of that local...);` 的 `_Safe` 函数返回 `_Bool` 或 `int`，但返回错误的值。在调用和返回之间添加任何 `_Unsafe { printf(...); }` 会使它"开始工作"——因为打印强制将值放入一个生命周期跨越析构函数的命名临时变量中。
-
-**最小重现（30 行）：**
-
-```c
-#include "string.hbs"
-#include <stdio.h>
-
-_Safe static String make(void) { _Unsafe { return String::from("x"); } }
-
-_Safe static _Bool buggy(const String* _Borrow a) {
-    String b = make();
-    return a->equals(&_Const b);   /* BUG：即使 a == b 也返回 0 */
-}
-
-_Safe static _Bool stashed(const String* _Borrow a) {
-    String b = make();
-    _Bool r = a->equals(&_Const b);
-    return r;                       /* OK：返回 1 */
-}
-
-int main(void) {
-    String a = make();
-    _Unsafe {
-        printf("buggy   = %d\n", (int)buggy  (&_Const a));  /* 打印 0 */
-        printf("stashed = %d\n", (int)stashed(&_Const a));  /* 打印 1 */
-    }
-    return 0;
-}
-```
-
-**AST 证据**——使用 `clang -Xclang -ast-dump -fsyntax-only` 转储。
-
-有 bug 模式的 `CompoundStmt`：
-```
-├── DeclStmt: b = make()
-├── DeclStmt: b_is_moved = 0
-├── IfStmt: if (!b_is_moved) ~String(b)     ← 析构函数在此触发
-└── ReturnStmt
-    └── CallExpr: a->equals(&_Const b)      ← 在析构函数之后读取 b
-```
-
-无 bug 模式的 `CompoundStmt`：
-```
-├── DeclStmt: b = make()
-├── DeclStmt: b_is_moved = 0
-├── DeclStmt: r = a->equals(&_Const b)      ← 在析构函数之前读取 b
-├── IfStmt:  if (!b_is_moved) ~String(b)
-└── ReturnStmt: return r
-```
-
-同一组节点，不同的顺序。析构函数去语法糖阶段将析构函数 `IfStmt` 插入到语句列表的末尾，而不考虑尾随的 `ReturnStmt` 的操作数是否仍在借用拥有的局部变量。
-
-**触发条件**——三个条件必须同时满足：
-1. 函数在返回时有一个仍在作用域的 `_Owned` 局部变量（`String`、任何 `_Owned struct`）。
-2. 返回表达式是一个以 `*_Borrow` 形式获取该局部变量的 `CallExpr`（直接或通过另一个参数间接）。
-3. 被调用者实际**解引用**该借用以计算返回值。忽略借用参数的被调用者不会触发该 bug。
-
-**解决方法**——首先将调用结果存入命名的局部变量：
-
-```c
-// 不好——错误的返回值
-_Safe _Bool check(const String* _Borrow a) {
-    String b = make();
-    return a->equals(&_Const b);
-}
-
-// 好——相同代码，结果存入局部变量
-_Safe _Bool check(const String* _Borrow a) {
-    String b = make();
-    _Bool r = a->equals(&_Const b);
-    return r;
-}
-```
-
-存入局部变量强制将 `b` 的使用放入更早的 `DeclStmt`，该语句在析构函数槽之前完成。然后 `ReturnStmt` 只读取 `r`（普通的 `_Bool`，没有借用），因此析构函数顺序不再重要。
-
-**如何在实际情况中注意到这个 bug：** 从辅助函数返回的值看起来反转或荒谬，但辅助函数自身的逻辑是正确的。在最后一次借用使用和返回之间插入 `printf`——如果 bug 消失，你就遇到了 §8.7。应用存入局部变量的解决方法。
-
-**此 bug 适用于任何返回表达式形状，其中返回值依赖于被调用者通过范围内 `_Owned` 局部变量的借用进行读取**，包括：
-- `return owned_local.method(...);` 其中方法读取 `this`
-- `return helper(&_Const owned_local);`
-- `return outer(inner(&_Const owned_local));`
-
-**此 bug 在以下情况下不适用：**
-- 返回表达式根本不引用 `_Owned` 局部变量
-- 返回值已经是返回语句之前计算的普通副本
-- `_Owned` 局部变量在返回前已被移出（然后析构函数被 `b_is_moved=1` 跳过，不存在已释放内存的读取）
-
-## 9. 快速参考
+## 8. 快速参考
 
 | 错误 | 修复 |
 |---------|-----|
@@ -547,8 +365,6 @@ _Safe _Bool check(const String* _Borrow a) {
 | 安全区域中的联合体 `.member` | 禁止——使用 `_Unsafe {}` 逃逸 |
 | 安全区域中的类别转换 | 不允许跨类别转换（`T *_Owned` 到 `void *_Owned` 除外） |
 | 安全区域中的 `&_Mut` 全局变量 | 禁止——仅允许对全局变量使用 `&_Const` |
-| `_Trait T var` | `_Trait T* ptr` |
-| 缺少 `struct` | `struct S`，除非使用 typedef |
 | 移动后使用 | 在转移所有权之前使用 |
 | 拥有的变量未释放 | 在作用域结束前 `safe_free`、传递或返回 |
 | 表达式中的 `_Await` | 先赋值给变量 |
@@ -559,8 +375,6 @@ _Safe _Bool check(const String* _Borrow a) {
 | 解引用可空指针 | 先空检查：`if (p != nullptr) { *p = ... }` |
 | 数组按元素初始化 | 使用初始化列表 `{1,2,3}` 或 `__assume_initialized` |
 | 未初始化的局部变量 | 在使用前初始化；字段级追踪适用 |
-| 从拥有的局部变量的借用返回错误值 | 先存入局部变量；参见 §8.7 |
-
 > 关于详细的错误码，请参见 `bsc-errors` 技能
 > 关于安全区域规则，请参见 `bsc-safe-zone` 技能
 > 关于所有权规则，请参见 `bsc-ownership` 技能

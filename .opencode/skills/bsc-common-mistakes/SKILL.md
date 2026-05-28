@@ -1,6 +1,6 @@
 ---
 name: bsc-common-mistakes
-description: "BiSheng C common mistakes and fixes. When you encounter BSC compilation errors, need to debug code, or want to avoid common pitfalls with ownership, borrowing, safe zones, traits, or generics, use this Skill."
+description: "BiSheng C common mistakes and fixes. When you encounter BSC compilation errors, need to debug code, or want to avoid common pitfalls with ownership, borrowing, or safe zones, use this Skill."
 ---
 
 # BiSheng C Common Mistakes Skill
@@ -253,36 +253,15 @@ For an owned value, hover also shows `Moved into foo()` with line numbers.
 This is the information the use-after-move diagnostic should print but
 doesn't — LSP fills the gap.
 
-## 4. Trait Mistakes
+## 4. Nullability Mistakes
 
-### 4.1 Non-pointer trait variable
-```c
-// _Trait Printable obj;       // error: only pointer form
-_Trait Printable* obj = &val;  // correct
-```
-
-### 4.2 Missing `struct` keyword
-```c
-// void S::method(S* this) { ... }               // error (unless typedef-ed)
-void struct S::method(struct S* this) { ... }     // correct
-```
-
-### 4.3 `_Impl` before methods defined
-```c
-// Define methods FIRST, then _Impl
-void struct Circle::print(struct Circle* this) { ... }
-_Impl _Trait Printable for struct Circle;
-```
-
-## 5. Nullability Mistakes
-
-### 5.1 `_Owned` pointer without `_Nullable` when it can be null
+### 4.1 `_Owned` pointer without `_Nullable` when it can be null
 ```c
 // int *_Owned p = nullptr;               // error: _Owned is Nonnull by default
 int *_Owned _Nullable p = nullptr;        // correct
 ```
 
-### 5.2 Dereferencing nullable pointer without null check
+### 4.2 Dereferencing nullable pointer without null check
 ```c
 _Safe void f(int *_Borrow _Nullable p) {
     // *p = 10;                           // error: nullable pointer
@@ -290,7 +269,7 @@ _Safe void f(int *_Borrow _Nullable p) {
 }
 ```
 
-### 5.3 Passing nullable to nonnull parameter
+### 4.3 Passing nullable to nonnull parameter
 ```c
 _Safe void bar(int *_Borrow p) {}     // nonnull param
 _Safe void f(int *_Borrow _Nullable p) {
@@ -299,9 +278,9 @@ _Safe void f(int *_Borrow _Nullable p) {
 }
 ```
 
-## 6. Initialization Mistakes
+## 5. Initialization Mistakes
 
-### 6.1 Using variable before initializing
+### 5.1 Using variable before initializing
 ```c
 _Safe void f(void) {
     int x;
@@ -311,7 +290,7 @@ _Safe void f(void) {
 }
 ```
 
-### 6.2 Array element-by-element assignment not counted
+### 5.2 Array element-by-element assignment not counted
 ```c
 _Safe void f(void) {
     int arr[3];
@@ -323,7 +302,7 @@ _Safe void f(void) {
 }
 ```
 
-### 6.3 Taking address of uninitialized variable
+### 5.3 Taking address of uninitialized variable
 ```c
 _Safe void f(void) {
     int x;
@@ -333,9 +312,9 @@ _Safe void f(void) {
 }
 ```
 
-## 7. Async Mistakes
+## 6. Async Mistakes
 
-### 7.1 `_Await` in binary expression
+### 6.1 `_Await` in binary expression
 ```c
 // int result = _Await compute(1) + _Await compute(2);  // error
 int a = _Await compute(1);
@@ -343,19 +322,19 @@ int b = _Await compute(2);
 int result = a + b;
 ```
 
-### 7.2 Multiple `_Await` in same argument list
+### 6.2 Multiple `_Await` in same argument list
 ```c
 // f(_Await g(), _Await h());          // error: multiple _Await at same level
 int a = _Await g();
 f(a, _Await h());                      // correct: pre-evaluate one
 ```
 
-## 8. Debugging Runtime Memory Bugs
+## 7. Debugging Runtime Memory Bugs
 
 When BSC code compiles cleanly but **double-frees** or **uses freed memory**
 at runtime, follow this triage flow before suspecting the compiler.
 
-### 8.1 Use valgrind, not gdb, to localize double-free
+### 7.1 Use valgrind, not gdb, to localize double-free
 
 `free(): double free detected in tcache 2` from glibc gives you only the second
 free's stack trace under gdb. Valgrind shows BOTH frees and the original `malloc`,
@@ -369,7 +348,7 @@ Look for the "Invalid read" / "Invalid free" report. The "Address X is N bytes i
 a block of size M free'd" line tells you where the same address was freed earlier,
 plus the stack at that earlier free.
 
-### 8.2 Rule out test-order pollution before blaming the compiler
+### 7.2 Rule out test-order pollution before blaming the compiler
 
 If a function works in isolation (standalone repro binary) but fails when called
 after other tests in a larger suite, the bug is **state pollution**, not codegen:
@@ -383,9 +362,9 @@ after other tests in a larger suite, the bug is **state pollution**, not codegen
 Reproduce with: build a minimal `main` that calls **only the failing function**
 in a fresh process. If it passes, the bug is contextual.
 
-### 8.3 Inspect the desugared AST (driver mode) before claiming compiler bug
+### 7.3 Inspect the desugared AST (driver mode) before claiming compiler bug
 
-Most "compiler bug" hypotheses for destructor double-frees turn out to be wrong.
+Most "compiler bug" hypotheses turn out to be wrong.
 Verify with:
 
 ```bash
@@ -397,10 +376,10 @@ IfStmt for the variable you suspect. If the compiler's machinery is intact, the
 bug is in your library's heap-pointer aliasing.
 
 **Do NOT use `clang -cc1 -fsyntax-only` for this** — it lacks system includes,
-which makes every `_Owned struct` spuriously "invalid" in the AST. See the
+which makes every struct with `_Owned` fields spuriously "invalid" in the AST. See the
 `/bsc-compile` skill §6 for details.
 
-### 8.4 Common library-level causes of double-free
+### 7.4 Common library-level causes of double-free
 
 When the compiler is doing the right thing, the real cause is usually one of:
 
@@ -412,209 +391,18 @@ When the compiler is doing the right thing, the real cause is usually one of:
 - **Returning a borrow whose underlying owned value is moved by the caller**:
   the borrow becomes dangling.
 - **Manual `_Unsafe` byte-assignment overwriting an `_Owned` slot without
-  destructing the previous contents**: the old heap pointers leak (single
+  freeing the previous contents**: the old heap pointers leak (single
   copy) or alias (if they were just shifted in by `memmove`).
 
-### 8.5 Triage flow summary
+### 7.5 Triage flow summary
 
 1. Reproduce under valgrind → get both free sites + malloc origin.
 2. Test in isolation → confirm/deny test-order pollution.
-3. Driver-mode AST dump → confirm compiler destructor insertion is correct.
+3. Driver-mode AST dump → confirm compiler move-tracking is correct.
 4. Only THEN consider compiler-level bug. In practice, >90% of double-frees in
    BSC projects trace to library-level aliasing, not codegen.
 
-### 8.6 Known compiler bug: `_Owned` arg in `if`/`while`/`for` condition is not move-tracked
-
-The BSC destructor desugar pass (`SemaBSCDestructor.cpp::VisitCompoundStmt`) only
-runs move-tracking for statements whose **outer** type is `BinaryOperator`,
-`DeclStmt`, or `CallExpr`. When a function call consuming an `_Owned` argument
-appears **inside an `if`/`while`/`for`/`switch` condition**, the outer statement
-is `IfStmt` (etc.), so the move-tracking is skipped entirely. The `is_moved`
-flag never gets set to 1, and the destructor fires at scope exit on already-freed
-memory → double free.
-
-**Symptom:** `free(): double free detected in tcache 2` immediately after a
-function call that takes `_Owned` argument(s) and is wrapped in an `if` condition.
-
-**Minimal reproducer (29 lines):**
-
-```c
-#include "bishengc_safety.hbs"
-#include <stdlib.h>
-
-_Owned struct Box {
-_Public:
-    int *_Owned data;
-    ~Box(Box this) {
-        _Unsafe { free((void*)__move_to_raw(this.data)); }
-    }
-};
-
-_Safe Box Box::new(void) {
-    Box b = { .data = safe_malloc(0) };
-    return b;
-}
-
-_Safe int consume(Box b) { return 1; }   /* takes ownership */
-
-int main(void) {
-    Box b = Box::new();
-    if (consume(b) == 1) { }  /* BUG: b not marked moved → double free at } */
-    return 0;
-}
-```
-
-**AST evidence** — dump with `clang -Xclang -ast-dump -fsyntax-only`:
-- Working pattern (`int r = consume(b); if (r == 1) {}`): AST shows
-  `BinaryOperator '=' b_is_moved = 1` after the call.
-- Buggy pattern (`if (consume(b) == 1) {}`): NO `b_is_moved = 1` assignment,
-  only the initial `b_is_moved = 0` and the destructor `if (!b_is_moved)` check.
-
-**Workaround** — store the call result in a local before testing:
-
-```c
-// BAD — double free
-if (consume(owned_value) == 1) { ... }
-
-// GOOD — extract the call
-int result = consume(owned_value);
-if (result == 1) { ... }
-
-// ALSO GOOD — call as standalone statement
-consume(owned_value);
-if (some_other_check) { ... }
-```
-
-**This bug applies to**:
-- `if (call(owned) ...)` and `if (... call(owned) ...)`
-- `while (call(owned) ...)`, `for (...; call(owned); ...)`
-- `switch (call(owned))`
-- Any condition expression containing a `CallExpr` that consumes `_Owned` args
-
-**This bug does NOT apply to**:
-- `T result = call(owned);` followed by `if (result ...)` — DeclStmt is checked
-- `call(owned);` as a standalone statement — CallExpr is checked
-- `lhs = call(owned);` as a top-level assignment — BinaryOperator is checked
-
-**When you suspect this bug:** convert one suspected call site to the workaround
-form. If the double-free goes away, you've confirmed it. Apply the same workaround
-to all sibling sites in the same scope.
-
-### 8.7 Known compiler bug: destructor of `_Owned` local fires BEFORE a return expression that borrows it
-
-The destructor desugar pass emits the destructor `IfStmt` for each `_Owned` local
-as a sibling statement **before** the `ReturnStmt` at scope end. If the return
-expression is a call that reads through a borrow of that local
-(`return f(&_Const b, ...)`), the call runs **on already-destructed memory** and
-returns a wrong value. No crash, no warning — just a silently-corrupt return.
-
-This is distinct from §8.6: that one is a missing move-flag assignment in an
-`if`/`while` condition. This one is misordering between destructor insertion
-and the `ReturnStmt`'s operand evaluation, even when no move is involved.
-
-**Symptom:** a `_Safe` function returning `_Bool` or `int` that contains an
-`_Owned` local and a `return f(...borrow of that local...);` returns the wrong
-value. Adding any `_Unsafe { printf(...); }` between the call and the return
-makes it "start working" — because the print forces the value into a named
-temporary whose lifetime spans the destructor.
-
-**Minimal reproducer (30 lines):**
-
-```c
-#include "string.hbs"
-#include <stdio.h>
-
-_Safe static String make(void) { _Unsafe { return String::from("x"); } }
-
-_Safe static _Bool buggy(const String* _Borrow a) {
-    String b = make();
-    return a->equals(&_Const b);   /* BUG: returns 0 even though a == b */
-}
-
-_Safe static _Bool stashed(const String* _Borrow a) {
-    String b = make();
-    _Bool r = a->equals(&_Const b);
-    return r;                       /* OK: returns 1 */
-}
-
-int main(void) {
-    String a = make();
-    _Unsafe {
-        printf("buggy   = %d\n", (int)buggy  (&_Const a));  /* prints 0 */
-        printf("stashed = %d\n", (int)stashed(&_Const a));  /* prints 1 */
-    }
-    return 0;
-}
-```
-
-**AST evidence** — dump with `clang -Xclang -ast-dump -fsyntax-only`.
-
-Buggy pattern's `CompoundStmt`:
-```
-├── DeclStmt: b = make()
-├── DeclStmt: b_is_moved = 0
-├── IfStmt: if (!b_is_moved) ~String(b)     ← destructor fires HERE
-└── ReturnStmt
-    └── CallExpr: a->equals(&_Const b)      ← b read AFTER destructor
-```
-
-Stashed pattern's `CompoundStmt`:
-```
-├── DeclStmt: b = make()
-├── DeclStmt: b_is_moved = 0
-├── DeclStmt: r = a->equals(&_Const b)      ← b read BEFORE destructor
-├── IfStmt:  if (!b_is_moved) ~String(b)
-└── ReturnStmt: return r
-```
-
-Same set of nodes, different order. The pass inserts the destructor `IfStmt` at
-the end of the statement list regardless of whether the trailing `ReturnStmt`'s
-operand still borrows the owned local.
-
-**Triggering conditions** — all three must hold:
-1. The function has an `_Owned` local (`String`, any `_Owned struct`) still in scope at return.
-2. The return expression is a `CallExpr` that takes a `*_Borrow` to that local (directly or transitively through another arg).
-3. The callee actually **dereferences** that borrow to compute the return value. Callees that ignore the borrow argument don't trigger the bug.
-
-**Workaround** — stash the call result in a named local first:
-
-```c
-// BAD — wrong return value
-_Safe _Bool check(const String* _Borrow a) {
-    String b = make();
-    return a->equals(&_Const b);
-}
-
-// GOOD — same code, result stashed in a local
-_Safe _Bool check(const String* _Borrow a) {
-    String b = make();
-    _Bool r = a->equals(&_Const b);
-    return r;
-}
-```
-
-The stashing forces the use of `b` into an earlier `DeclStmt`, which completes
-before the destructor slot. The `ReturnStmt` then only reads `r` (a plain
-`_Bool`, no borrow), so the destructor ordering no longer matters.
-
-**How to notice this bug in the wild:** the values coming back from a helper
-function look inverted or nonsensical, but the helper's own logic is correct.
-Insert a `printf` between the last borrow-use and the return — if the bug
-disappears, you're hitting §8.7. Apply the stash workaround.
-
-**This bug applies to any return-expression shape where the return value depends
-on a callee reading through a borrow of an in-scope `_Owned` local**, including:
-- `return owned_local.method(...);` where the method reads `this`
-- `return helper(&_Const owned_local);`
-- `return outer(inner(&_Const owned_local));`
-
-**This bug does NOT apply when:**
-- The return expression doesn't reference the `_Owned` local at all
-- The return value is already a plain copy computed before the return statement
-- The `_Owned` local has been moved out before the return (then the destructor
-  is skipped by `b_is_moved=1`, and there's no freed-memory read)
-
-## 9. Quick Reference
+## 8. Quick Reference
 
 | Mistake | Fix |
 |---------|-----|
@@ -627,8 +415,6 @@ on a callee reading through a borrow of an in-scope `_Owned` local**, including:
 | Union `.member` in safe | Forbidden — use `_Unsafe {}` escape |
 | Cast categories in safe | No cross-casts (except `T *_Owned` to `void *_Owned`) |
 | `&_Mut` global in safe | Forbidden — only `&_Const` of globals |
-| `_Trait T var` | `_Trait T* ptr` |
-| Missing `struct` | `struct S` unless typedef-ed |
 | Use after move | Use before transferring ownership |
 | Owned not freed | `safe_free`, pass, or return before scope ends |
 | `_Await` in expr | Assign to variable first |
@@ -639,8 +425,6 @@ on a callee reading through a borrow of an in-scope `_Owned` local**, including:
 | Deref nullable | Null-check first: `if (p != nullptr) { *p = ... }` |
 | Array init by element | Use init list `{1,2,3}` or `__assume_initialized` |
 | Uninitialized local | Initialize before use; field-level tracking applies |
-| Wrong return value from borrow of owned local | Stash into a local first; see §8.7 |
-
 > For detailed error codes, see `bsc-errors` Skill
 > For safe zone rules, see `bsc-safe-zone` Skill
 > For ownership rules, see `bsc-ownership` Skill

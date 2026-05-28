@@ -15,14 +15,10 @@ BSC errors use the format `BSC-Exxxx` (errors) and `BSC-Wxxxx` (warnings), group
 | BSC-E02xx | Borrow Checking | Lifetime, multiple borrows, assign-while-borrowed |
 | BSC-E03xx | Safe Zone | Forbidden operations in `_Safe` functions/blocks |
 | BSC-E04xx | Nullability | Deref/pass/return/cast nullable pointers |
-| BSC-E05xx | Traits | Undefined traits, unimplemented functions, type conflicts |
-| BSC-E06xx | Owned Struct / Destructor | Struct tags, destructors, member issues |
-| BSC-E07xx | Type System | `_Owned`/`_Borrow` qualifier conflicts, incompatible casts |
-| BSC-E08xx | Async | `_Async`/`_Await` usage |
-| BSC-E09xx | Generics / Constexpr | Generic function issues, constexpr limitations |
-| BSC-E10xx | Parse-level | BSC-specific syntax errors |
-| BSC-E11xx | Member Functions | Instance members, attributes |
-| BSC-E12xx | Operator Overload | Overload restrictions |
+| BSC-E05xx | Type System | `_Owned`/`_Borrow` qualifier conflicts, incompatible casts |
+| BSC-E06xx | Async | `_Async`/`_Await` usage |
+| BSC-E07xx | Parse-level | BSC-specific syntax errors |
+| BSC-E08xx | Operator Overload | Overload restrictions |
 
 ## 2. Diagnostic Suppression Flags
 
