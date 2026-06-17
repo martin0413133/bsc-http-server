@@ -1,14 +1,15 @@
 #ifndef CC_CONFIG_HBS
 #define CC_CONFIG_HBS
-#include "string.hbs"
+#include <stddef.h>
 
-_Owned struct Config {
-_Public:
+struct Config {
     int port;
     int threads;
-    String document_root;
+    char document_root[256];
 };
 
-_Safe Config Config::default_config(void);
-_Safe Config Config::parse(const String* _Borrow text);   // parse from a String (business; no file IO)
+_Safe struct Config config_default(void);
+// 从缓冲解析。形参用 _Borrow _ArrayElem：既能下标遍历，又能直接收字面量与
+// owned 缓冲的 &_Const x[0]（免去把 owned 拷到栈裸缓冲）。
+_Safe struct Config config_parse(const char *_Borrow _ArrayElem text);
 #endif

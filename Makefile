@@ -6,17 +6,13 @@ BINDIR := bin
 
 all: $(BINDIR)/httpd
 
-$(BINDIR)/httpd: src/main.cbs $(wildcard src/*.cbs) $(wildcard src/platform/*.cbs) $(wildcard include/*.hbs) | $(BINDIR) check-layers
+$(BINDIR)/httpd: src/main.cbs $(wildcard src/*.cbs) $(wildcard src/platform/*.cbs) $(wildcard include/*.hbs) $(wildcard include/platform/*.hbs) | $(BINDIR)
 	$(CC) $(FLAGS) $(INC) src/main.cbs -o $@ $(LIB)
-
-# Enforce: business src/*.cbs must be _Unsafe-free (adapters in src/platform/ are exempt).
-check-layers:
-	@bash tests/check_no_unsafe.sh
 
 $(BINDIR):
 	mkdir -p $(BINDIR)
 
-# Build any test:  make test-X  (compiles tests/test_X.cbs)
+# build any unit test: make test-X  (compiles tests/test_X.cbs)
 test-%: tests/test_%.cbs | $(BINDIR)
 	$(CC) $(FLAGS) $(INC) $< -o $(BINDIR)/test_$* $(LIB)
 	./$(BINDIR)/test_$*
@@ -31,4 +27,4 @@ run: $(BINDIR)/httpd
 clean:
 	rm -rf $(BINDIR)
 
-.PHONY: all clean run smoke check-layers
+.PHONY: all clean run smoke

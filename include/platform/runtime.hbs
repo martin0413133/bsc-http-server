@@ -1,0 +1,11 @@
+#ifndef CC_RUNTIME_HBS
+#define CC_RUNTIME_HBS
+#include "../config.hbs"
+#include "../router.hbs"
+
+struct ServerCtx { struct Config config; struct Router router; };
+
+// 运行 accept 循环：绑定端口、启动线程池、accept→submit。绑定失败返回 -1。
+// config/router 按值拷入进程级 static 上下文，供 worker 只读。
+_Safe int server_run(const struct Config* _Borrow config, const struct Router* _Borrow router);
+#endif

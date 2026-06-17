@@ -1,21 +1,31 @@
-#include "fs.hbs"
+#include "../../include/platform/fs.hbs"
 #include <stdio.h>
 
-#define FS_CHUNK 4096
-
-_Safe _Bool fs_read_file(const char* _Nonnull path, String* _Borrow out) {
-    char chunk[FS_CHUNK] = {0};
-    _Bool ok = 0;
+_Safe char *_Owned _ArrayElem _Nullable fs_read_file(const char* _Nonnull path, size_t* _Borrow out_len) {
+    *out_len = 0;
+    char *_Owned _ArrayElem _Nullable result = nullptr;
+    // 整块为文件 I/O FFI 接缝：fopen/fseek/ftell/fread/fclose 系统调用、原始 `FILE*` 句柄、
+    // NULL 比较、fread 写入裸栈数组 chunk —— 安全区均禁止。块内的 safe_malloc_array 与
+    // buf[]/result 赋值本身是安全区合法的，只是与文件读取逻辑交织，故同处一块以保持可读。
     _Unsafe {
         FILE* f = fopen(path, "rb");
-        if (f != NULL) {
-            size_t n;
-            while ((n = fread(chunk, 1, FS_CHUNK, f)) > 0) {
-                for (size_t i = 0; i < n; i++) { out->push(chunk[i]); }
-            }
-            fclose(f);
-            ok = 1;
+        if (f == NULL) { return nullptr; }       // result 仍为 nullptr，无泄漏
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz < 0) { fclose(f); return nullptr; }
+        // safe_malloc_array 是 _Safe 函数，可在 _Unsafe 块内调用
+        char *_Owned _ArrayElem buf = safe_malloc_array((size_t)sz + 1, (char)0);
+        size_t pos = 0;
+        char chunk[4096];
+        size_t n;
+        while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) {
+            for (size_t i = 0; i < n && pos < (size_t)sz; i++) { buf[pos] = chunk[i]; pos++; }
         }
+        fclose(f);
+        buf[pos] = '\0';
+        *out_len = pos;
+        result = buf;        // 把 buf 移入 result
     }
-    return ok;
+    return result;
 }

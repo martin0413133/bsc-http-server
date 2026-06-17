@@ -1,7 +1,7 @@
 #ifndef CC_LOG_HBS
 #define CC_LOG_HBS
-
-// Adapter: stderr logging (wraps variadic fprintf).
+// 记录一次请求行（方法 路径 -> 状态）到 stderr。
 _Safe void log_request(const char* _Nonnull method, const char* _Nonnull path, int status);
+// 记录一条诊断信息到 stderr。
 _Safe void log_msg(const char* _Nonnull msg);
 #endif

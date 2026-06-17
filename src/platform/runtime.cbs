@@ -1,71 +1,68 @@
-#include "runtime.hbs"
-#include "net.hbs"
-#include "log.hbs"
-#include "thread_pool.hbs"
+#include "../../include/platform/runtime.hbs"
+#include "../../include/platform/net.hbs"
+#include "../../include/platform/log.hbs"
+#include "../../include/platform/thread_pool.hbs"
 #include "../../include/handler.hbs"
-#include "../../include/str_util.hbs"
+#include "../../include/http_request.hbs"
 #include "../../include/http_response.hbs"
-#include "bishengc_safety.hbs"
-#include <stdio.h>
+#include "../../include/str_util.hbs"
 
-#define RT_REQ_BUF 8200
+#define REQ_BUF 8192
 
-// Worker callback (matches ConnHandler). _Safe so the _Owned locals (reqbuf/resp/wire)
-// are RAII-managed; only the void*/raw bridge is _Unsafe.
-_Safe void runtime_handle_conn(int fd, void* _Nonnull ctx_raw) {
-    String reqbuf = String::new();
-    if (!net_recv_string(fd, &_Mut reqbuf)) {
-        net_close(fd);
-        return;
-    }
-    char rawc[RT_REQ_BUF] = {0};
-    str_to_cbuf(&_Const reqbuf, rawc, RT_REQ_BUF);
+// 进程级共享只读上下文（按值持有；无 owned 数据）。
+static struct ServerCtx g_ctx;
 
-    // Bridge raw shared context -> borrows for the business core.
+// 处理一个连接：读请求、处理、响应、关闭。运行在 worker 线程。
+_Safe void handle_conn(int fd, void* _Nonnull ctx_raw) {
+    // 需 _Unsafe：void* -> 具体指针的转换在安全区被禁（线程池只能传 void* ctx）。
     struct ServerCtx* ctx = _Unsafe((struct ServerCtx*)ctx_raw);
-    const Config* _Borrow cfg = _Unsafe(&_Const *(ctx->config));
-    const Router* _Borrow rt  = _Unsafe(&_Const *(ctx->router));
+    char buf[REQ_BUF] = {0};
+    ssize_t n = net_recv(fd, buf, REQ_BUF);
+    if (n <= 0) { net_close(fd); return; }
 
-    Response resp = handle_request(cfg, rt, rawc);
-    String wire = resp.to_string();
-    net_send_string(fd, &_Const wire);
+    // 需 _Unsafe：ctx 是裸指针，`ctx->` 解引用禁于安全区；这里从裸 ctx 重建只读借用，
+    // 之后 cfg/rt 在安全区内正常使用（借用寿命受 g_ctx 的进程级生命周期覆盖）。
+    const struct Config* _Borrow cfg = _Unsafe(&_Const ctx->config);
+    const struct Router* _Borrow rt  = _Unsafe(&_Const ctx->router);
 
-    // access log: "METHOD PATH" from the request line
-    char method[16] = {0};
-    char path[256] = {0};
-    size_t i = 0;
-    size_t k = 0;
-    while (rawc[i] != '\0' && rawc[i] != ' ' && k < 15) { method[k] = rawc[i]; k++; i++; }
-    while (rawc[i] == ' ') { i++; }
-    k = 0;
-    while (rawc[i] != '\0' && rawc[i] != ' ' && rawc[i] != '\r' && rawc[i] != '\n' && k < 255) { path[k] = rawc[i]; k++; i++; }
-    log_request(method, path, resp.status);
+    struct Response resp = handle_request(cfg, rt, buf);
+    size_t wlen = 0;
+    char *_Owned _ArrayElem wire = response_serialize(&_Const resp, &_Mut wlen);
 
+    // 分段发送：用下标从 owned 报文读入栈缓冲（避免 _Borrow/_Owned -> raw 转换）
+    size_t off = 0;
+    while (off < wlen) {
+        char out[4096] = {0};
+        size_t m = 0;
+        while (off < wlen && m < sizeof(out)) { out[m] = wire[off]; m++; off++; }
+        if (net_send_all(fd, out, m) != 0) { break; }
+    }
+    safe_free_array(wire);
+    log_request("conn", "", resp.status);   // 简单请求日志；状态码足够诊断
+    response_free(resp);                     // 无 _Owned struct 自动析构，显式释放 resp
     net_close(fd);
 }
 
-_Safe int runtime_serve(Config *_Owned cfg, Router *_Owned router) {
-    int port = cfg->port;
-    int threads = cfg->threads;
-    _Unsafe {
-        // Move both onto raw pointers shared (read-only) with worker threads.
-        // They live for the whole run; consumed here so no later free is owed.
-        static struct ServerCtx ctx;
-        ctx.config = (const Config* _Nonnull)__move_to_raw(cfg);
-        ctx.router = (const Router* _Nonnull)__move_to_raw(router);
+_Safe int server_run(const struct Config* _Borrow config, const struct Router* _Borrow router) {
+    int listen_fd = net_listen(config->port, 128);
+    if (listen_fd < 0) { return -1; }
+    // 把 config/router 拷入进程级 static 上下文（纯 struct 按值拷贝）。
+    // 无需 _Unsafe：对全局结构体字段赋值、解引用只读借用 *config 读取，均为安全区合法操作。
+    g_ctx.config = *config;
+    g_ctx.router = *router;
+    // 需 _Unsafe：`&g_ctx` 取址 + 转 void*（要塞进线程池的 void* ctx 通道）。
+    void* _Nonnull ctxp = _Unsafe((void* _Nonnull)&g_ctx);
 
-        int listen_fd = net_listen(port, 128);
-        if (listen_fd < 0) { return -1; }
-
-        static struct ThreadPool pool;
-        if (thread_pool_start(&pool, threads, runtime_handle_conn, &ctx) != 0) { return -1; }
-
-        fprintf(stderr, "cc_httpd listening on port %d (threads=%d)\n", port, threads);
-        for (;;) {
-            int client = net_accept(listen_fd);
-            if (client < 0) { continue; }
-            thread_pool_submit(&pool, client);
-        }
+    // 需 _Unsafe：`&pool` 取址 + 转裸 ThreadPool*（线程要在借用作用域之外长期使用 pool，
+    // 故用裸指针而非借用更贴合语义）。
+    struct ThreadPool pool = {0};
+    struct ThreadPool* _Nonnull poolp = _Unsafe((struct ThreadPool* _Nonnull)&pool);
+    if (thread_pool_start(poolp, config->threads, handle_conn, ctxp) != 0) { return -1; }
+    log_msg("cc_httpd listening");
+    for (;;) {
+        int client = net_accept(listen_fd);
+        if (client < 0) { continue; }
+        thread_pool_submit(poolp, client);
     }
     return 0;
 }

@@ -1,0 +1,14 @@
+#ifndef CC_NET_HBS
+#define CC_NET_HBS
+#include <stddef.h>
+#include <sys/types.h>
+// 创建+绑定+监听 port；返回监听 fd 或 -1。
+_Safe int net_listen(int port, int backlog);
+// 接受一个连接；返回客户端 fd 或 -1。
+_Safe int net_accept(int listen_fd);
+// recv 最多 cap-1 字节到 buf 并 NUL 结尾；返回读到的字节数（>=0）或 -1。
+_Safe ssize_t net_recv(int fd, char* _Nonnull buf, size_t cap);
+// 完整发送 len 字节（部分写循环）；成功返回 0，错误 -1。
+_Safe int net_send_all(int fd, const char* _Nonnull buf, size_t len);
+_Safe void net_close(int fd);
+#endif

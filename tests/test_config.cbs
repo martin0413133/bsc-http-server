@@ -1,3 +1,4 @@
+#include "bishengc_safety.hbs"
 #include <stdio.h>
 #include "../src/str_util.cbs"
 #include "../src/config.cbs"
@@ -5,17 +6,16 @@
 static int fails = 0;
 #define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
 
-int main(void) {
-    String text = String::new();
-    str_append_cstr(&_Mut text, "# comment\nport = 9090\ndocument_root = public\nthreads=8\n");
-    Config c = Config::parse(&_Const text);
+_Safe int main(void) {
+    // 字面量可直接传 _Borrow _ArrayElem 形参（无需先存到 const char* 变量）
+    struct Config c = config_parse("# comment\nport = 9090\ndocument_root = public\nthreads=8\n");
     CHECK(c.port == 9090, "port");
     CHECK(c.threads == 8, "threads");
-    CHECK(str_eq_cstr(&_Const c.document_root, "public"), "doc root");
+    CHECK(cbuf_eq(c.document_root, "public"), "doc root");
 
-    Config d = Config::default_config();
+    struct Config d = config_default();
     CHECK(d.port == 8080, "default port");
-    CHECK(str_eq_cstr(&_Const d.document_root, "www"), "default root");
+    CHECK(cbuf_eq(d.document_root, "www"), "default root");
 
     if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
     _Unsafe{printf("test_config OK\n");}

@@ -1,3 +1,4 @@
+#include "bishengc_safety.hbs"
 #include <stdio.h>
 #include "../src/str_util.cbs"
 #include "../src/http_request.cbs"
@@ -5,24 +6,26 @@
 static int fails = 0;
 #define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
 
-int main(void) {
-    const char* raw =
+_Safe int main(void) {
+    const char* _Nonnull raw =
         "GET /index.html HTTP/1.1\r\n"
         "Host: localhost\r\n"
         "User-Agent: test\r\n"
         "\r\n";
-    Request req = Request::parse(raw);
-    CHECK(str_eq_cstr(&_Const req.method, "GET"), "method");
-    CHECK(str_eq_cstr(&_Const req.path, "/index.html"), "path");
-    CHECK(str_eq_cstr(&_Const req.version, "HTTP/1.1"), "version");
+    struct Request req = request_parse(raw);
+    CHECK(cbuf_eq(req.method, "GET"), "method");
+    CHECK(cbuf_eq(req.path, "/index.html"), "path");
+    CHECK(cbuf_eq(req.version, "HTTP/1.1"), "version");
     CHECK(req.ok, "ok flag");
 
-    const String* _Borrow host = req.get_header("Host");
-    CHECK(host != nullptr && str_eq_cstr(host, "localhost"), "host header");
-    CHECK(req.get_header("Nope") == nullptr, "missing header");
+    const char* host = request_get_header(&_Const req, "Host");
+    CHECK(host != nullptr && cbuf_eq(host, "localhost"), "host header");
+    CHECK(request_get_header(&_Const req, "Nope") == nullptr, "missing header");
+    request_free(req);
 
-    Request bad = Request::parse("garbage-no-crlf");
+    struct Request bad = request_parse("garbage-no-crlf");
     CHECK(!bad.ok, "malformed not ok");
+    request_free(bad);
 
     if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
     _Unsafe{printf("test_http_request OK\n");}

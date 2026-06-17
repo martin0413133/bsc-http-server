@@ -1,6 +1,5 @@
 #ifndef CC_MIME_HBS
 #define CC_MIME_HBS
-// Returns a static Content-Type string for the file extension in `path`.
-// Pure safe-zone logic — no libc, no _Unsafe.
+// 返回 path 扩展名对应的静态 Content-Type 字符串（恒非空字面量）。
 _Safe const char* _Nonnull mime_for_path(const char* _Nonnull path);
 #endif

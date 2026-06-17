@@ -1,0 +1,8 @@
+#ifndef CC_FS_HBS
+#define CC_FS_HBS
+#include <stddef.h>
+#include "bishengc_safety.hbs"
+// 读整个文件到 owned 缓冲（NUL 结尾）；长度经 out_len 返回；失败返回 nullptr。
+// 调用方负责 safe_free_array。
+_Safe char *_Owned _ArrayElem _Nullable fs_read_file(const char* _Nonnull path, size_t* _Borrow out_len);
+#endif

@@ -1,35 +1,34 @@
 #include "../include/router.hbs"
 #include "../include/str_util.hbs"
 
-_Safe Router Router::new(void) {
-    Router r = { .routes = Vec<Route>::new() };
+_Safe struct Router router_new(void) {
+    struct Router r = { .routes = {}, .n_routes = 0 };
     return r;
 }
 
-_Safe void Router::add(Router* _Borrow this, const char* _Nonnull method, const char* _Nonnull path, Handler h) {
-    String m = String::new();
-    str_append_cstr(&_Mut m, method);
-    String p = String::new();
-    str_append_cstr(&_Mut p, path);
-    Route rt = { .method = m, .path = p, .handler = h };
-    this->routes.push(rt);
+_Safe void router_add(struct Router* _Borrow r, const char* _Nonnull method,
+                      const char* _Nonnull path, Handler h) {
+    if (r->n_routes >= MAX_ROUTES) { return; }
+    size_t k = r->n_routes;
+    cbuf_copy(r->routes[k].method, 8, method);
+    cbuf_copy(r->routes[k].path, 256, path);
+    r->routes[k].handler = h;
+    r->n_routes = k + 1;
 }
 
-_Safe Handler _Nullable Router::match(const Router* _Borrow this, const Request* _Borrow req) {
-    size_t n = this->routes.length();
-    for (size_t k = 0; k < n; k++) {
-        const Route* _Borrow rt = this->routes.get(k);
-        if (rt->method.equals(&_Const req->method) && rt->path.equals(&_Const req->path)) {
-            return rt->handler;
+_Safe Handler _Nullable router_match(const struct Router* _Borrow r, const struct Request* _Borrow req) {
+    for (size_t k = 0; k < r->n_routes; k++) {
+        if (cbuf_eq(r->routes[k].method, req->method)
+            && cbuf_eq(r->routes[k].path, req->path)) {
+            return r->routes[k].handler;
         }
     }
     return nullptr;
 }
 
-_Safe _Bool path_is_safe(const String* _Borrow path) {
-    size_t n = path->length();
-    for (size_t i = 0; i + 1 < n; i++) {
-        if (path->at(i) == '.' && path->at(i + 1) == '.') { return 0; }
+_Safe _Bool path_is_safe(const char* _Nonnull path) {
+    for (size_t i = 0; path[i] != '\0'; i++) {
+        if (path[i] == '.' && path[i + 1] == '.') { return 0; }
     }
     return 1;
 }

@@ -1,79 +1,66 @@
 #include "../include/http_response.hbs"
 #include "../include/str_util.hbs"
 
-_Safe Response Response::make(int status, const char* _Nonnull status_text) {
-    Response r = {
-        .status = status,
-        .status_text = String::new(),
-        .content_type = String::new(),
-        .body = String::new()
+_Safe struct Response response_with_owned(int status, const char* _Nonnull status_text,
+                                          const char* _Nonnull content_type,
+                                          char *_Owned _ArrayElem body, size_t body_len) {
+    struct Response r = {
+        .status = status, .status_text = {0}, .content_type = {0},
+        .body = body, .body_len = body_len      // body 在此移入
     };
-    str_append_cstr(&_Mut r.status_text, status_text);
+    cbuf_copy(r.status_text, sizeof(r.status_text), status_text);
+    cbuf_copy(r.content_type, sizeof(r.content_type), content_type);
     return r;
 }
 
-_Safe Response Response::ok_body(String body, const char* _Nonnull content_type) {
-    String st = String::new();
-    str_append_cstr(&_Mut st, "OK");
-    String ct = String::new();
-    str_append_cstr(&_Mut ct, content_type);
-    // move st, ct, body into the struct at construction (no _Owned-field reassignment)
-    Response r = {
-        .status = 200,
-        .status_text = st,
-        .content_type = ct,
-        .body = body
-    };
-    return r;
+_Safe struct Response response_with_cstr(int status, const char* _Nonnull status_text,
+                                         const char* _Nonnull content_type, const char* _Nonnull body) {
+    size_t len = cstr_len(body);
+    char *_Owned _ArrayElem buf = cbuf_dup_range(body, 0, len);
+    return response_with_owned(status, status_text, content_type, buf, len);
 }
 
-_Safe Response Response::ok_text(const char* _Nonnull body, const char* _Nonnull content_type) {
-    String b = String::new();
-    str_append_cstr(&_Mut b, body);
-    return Response::ok_body(b, content_type);
+_Safe struct Response response_not_found(void) {
+    return response_with_cstr(404, "Not Found", "text/html", "<h1>404 Not Found</h1>");
+}
+_Safe struct Response response_bad_request(void) {
+    return response_with_cstr(400, "Bad Request", "text/html", "<h1>400 Bad Request</h1>");
+}
+_Safe struct Response response_server_error(void) {
+    return response_with_cstr(500, "Internal Server Error", "text/html", "<h1>500 Internal Server Error</h1>");
 }
 
-_Safe Response Response::not_found(void) {
-    Response r = Response::make(404, "Not Found");
-    str_append_cstr(&_Mut r.content_type, "text/html");
-    str_append_cstr(&_Mut r.body, "<h1>404 Not Found</h1>");
-    return r;
-}
-
-_Safe Response Response::bad_request(void) {
-    Response r = Response::make(400, "Bad Request");
-    str_append_cstr(&_Mut r.content_type, "text/html");
-    str_append_cstr(&_Mut r.body, "<h1>400 Bad Request</h1>");
-    return r;
-}
-
-_Safe Response Response::server_error(void) {
-    Response r = Response::make(500, "Internal Server Error");
-    str_append_cstr(&_Mut r.content_type, "text/html");
-    str_append_cstr(&_Mut r.body, "<h1>500 Internal Server Error</h1>");
-    return r;
-}
-
-// append a base-10 size_t to a String (no sprintf in safe zone)
-_Safe void append_size(String* _Borrow s, size_t n) {
-    if (n == 0) { s->push('0'); return; }
-    char tmp[24] = {0};
-    size_t k = 0;
-    while (n > 0) { tmp[k] = (char)('0' + (n % 10)); n /= 10; k++; }
-    while (k > 0) { k--; s->push(tmp[k]); }
-}
-
-_Safe String Response::to_string(const Response* _Borrow this) {
-    String out = String::new();
-    str_append_cstr(&_Mut out, "HTTP/1.1 ");
-    append_size(&_Mut out, (size_t)this->status);
-    out.push(' ');
-    str_append(&_Mut out, &_Const this->status_text);
-    str_append_cstr(&_Mut out, "\r\nContent-Type: ");
-    str_append(&_Mut out, &_Const this->content_type);
-    str_append_cstr(&_Mut out, "\r\nContent-Length: ");
-    append_size(&_Mut out, this->body.length());
-    str_append_cstr(&_Mut out, "\r\nConnection: close\r\n\r\n");
-    str_append(&_Mut out, &_Const this->body);
+_Safe char *_Owned _ArrayElem response_serialize(const struct Response* _Borrow r, size_t* _Borrow out_len) {
+    // 第一遍：量长度
+    size_t total = 0;
+    total += cstr_len("HTTP/1.1 ");
+    total += uint_digits((size_t)r->status);
+    total += 1;                                  // 空格
+    total += cstr_len(r->status_text);
+    total += cstr_len("\r\nContent-Type: ");
+    total += cstr_len(r->content_type);
+    total += cstr_len("\r\nContent-Length: ");
+    total += uint_digits(r->body_len);
+    total += cstr_len("\r\nConnection: close\r\n\r\n");
+    total += r->body_len;
+    // 第二遍：一次分配 + 借用写入（&_Mut out[0] -> _Borrow _ArrayElem）
+    char *_Owned _ArrayElem out = safe_malloc_array(total + 1, (char)0);
+    size_t pos = 0;
+    put_cstr(&_Mut out[0], &_Mut pos, "HTTP/1.1 ");
+    put_uint(&_Mut out[0], &_Mut pos, (size_t)r->status);
+    out[pos] = ' '; pos++;
+    put_cstr(&_Mut out[0], &_Mut pos, r->status_text);
+    put_cstr(&_Mut out[0], &_Mut pos, "\r\nContent-Type: ");
+    put_cstr(&_Mut out[0], &_Mut pos, r->content_type);
+    put_cstr(&_Mut out[0], &_Mut pos, "\r\nContent-Length: ");
+    put_uint(&_Mut out[0], &_Mut pos, r->body_len);
+    put_cstr(&_Mut out[0], &_Mut pos, "\r\nConnection: close\r\n\r\n");
+    for (size_t i = 0; i < r->body_len; i++) { out[pos] = r->body[i]; pos++; }
+    out[pos] = '\0';
+    *out_len = pos;
     return out;
+}
+
+_Safe void response_free(struct Response r) {
+    safe_free_array(r.body);
 }

@@ -1,26 +1,27 @@
 #include "../include/file_server.hbs"
 #include "../include/str_util.hbs"
-#include "../include/router.hbs"   // path_is_safe
+#include "../include/router.hbs"      // path_is_safe
 #include "../include/mime.hbs"
-#include "platform/fs.hbs"         // fs_read_file (adapter)
+#include "../include/platform/fs.hbs"
 
-_Safe Response serve_static(const Config* _Borrow config, const Request* _Borrow req) {
-    // Map "/" -> "/index.html"
-    String rel = String::new();
-    if (str_eq_cstr(&_Const req->path, "/")) { str_append_cstr(&_Mut rel, "/index.html"); }
-    else { str_append(&_Mut rel, &_Const req->path); }
+_Safe struct Response serve_static(const struct Config* _Borrow config, const struct Request* _Borrow req) {
+    // 相对路径：'/' -> '/index.html'
+    char rel[1100] = {0};
+    if (cbuf_eq(req->path, "/")) { cbuf_copy(rel, sizeof(rel), "/index.html"); }
+    else { cbuf_copy(rel, sizeof(rel), req->path); }
 
-    if (!path_is_safe(&_Const rel)) { return Response::not_found(); }
+    if (!path_is_safe(rel)) { return response_not_found(); }
 
-    String full = String::new();
-    str_append(&_Mut full, &_Const config->document_root);
-    str_append(&_Mut full, &_Const rel);
+    // 完整路径 = document_root + rel
+    char full[1400] = {0};
+    cbuf_copy(full, sizeof(full), config->document_root);
+    size_t fl = cstr_len(full);
+    for (size_t i = 0; rel[i] != '\0' && fl < sizeof(full) - 1; i++) { full[fl] = rel[i]; fl++; }
+    full[fl] = '\0';
 
-    char pathbuf[2048] = {0};
-    str_to_cbuf(&_Const full, pathbuf, 2048);
-
-    String body = String::new();
-    _Bool ok = fs_read_file(pathbuf, &_Mut body);
-    if (!ok) { return Response::not_found(); }
-    return Response::ok_body(body, mime_for_path(pathbuf));
+    size_t flen = 0;
+    char *_Owned _ArrayElem _Nullable data = fs_read_file(full, &_Mut flen);
+    if (data == nullptr) { return response_not_found(); }
+    // data 已收窄为非空；移入 Response
+    return response_with_owned(200, "OK", mime_for_path(full), data, flen);
 }

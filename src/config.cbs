@@ -1,60 +1,57 @@
 #include "../include/config.hbs"
 #include "../include/str_util.hbs"
 
-_Safe Config Config::default_config(void) {
-    String dr = String::new();
-    str_append_cstr(&_Mut dr, "www");
-    Config c = { .port = 8080, .threads = 4, .document_root = dr };
+_Safe struct Config config_default(void) {
+    struct Config c = { .port = 8080, .threads = 4, .document_root = {0} };
+    cbuf_copy(c.document_root, 256, "www");
     return c;
 }
 
-// parse decimal int from a String (digits only)
-_Safe int parse_int(const String* _Borrow s) {
+// 从只含数字的 char 缓冲解析十进制 int
+_Safe int parse_int_buf(const char* _Nonnull s) {
     int v = 0;
-    size_t n = s->length();
-    for (size_t i = 0; i < n; i++) {
-        char ch = s->at(i);
-        if (ch >= '0' && ch <= '9') { v = v * 10 + (ch - '0'); }
+    for (size_t i = 0; s[i] != '\0'; i++) {
+        char ch = s[i];
+        if (ch >= '0' && ch <= '9') { v = v * 10 + (int)(ch - '0'); }
     }
     return v;
 }
 
-// Char at index, or '\0' past the end. Lets the NUL-sentinel scanner below run
-// unchanged on a (non-NUL-terminated) String borrow.
-static _Safe char at_or_nul(const String* _Borrow s, size_t i) {
-    return i < s->length() ? s->at(i) : '\0';
-}
-
-_Safe Config Config::parse(const String* _Borrow text) {
-    int port = 8080;
-    int threads = 4;
-    String dr = String::new();
-    str_append_cstr(&_Mut dr, "www");
-
+_Safe struct Config config_parse(const char *_Borrow _ArrayElem text) {
+    struct Config c = config_default();
     size_t i = 0;
-    while (at_or_nul(text, i) != '\0') {
-        while (at_or_nul(text, i) == ' ' || at_or_nul(text, i) == '\t') { i++; }
-        if (at_or_nul(text, i) == '#' || at_or_nul(text, i) == '\n' || at_or_nul(text, i) == '\r') {
-            while (at_or_nul(text, i) != '\0' && at_or_nul(text, i) != '\n') { i++; }
-            if (at_or_nul(text, i) == '\n') { i++; }
+    while (text[i] != '\0') {
+        while (text[i] == ' ' || text[i] == '\t') { i++; }
+        if (text[i] == '#' || text[i] == '\n' || text[i] == '\r') {
+            while (text[i] != '\0' && text[i] != '\n') { i++; }
+            if (text[i] == '\n') { i++; }
             continue;
         }
-        if (at_or_nul(text, i) == '\0') { break; }
-        String key = String::new();
-        String val = String::new();
-        while (at_or_nul(text, i) != '\0' && at_or_nul(text, i) != '=' && at_or_nul(text, i) != '\n' && at_or_nul(text, i) != ' ' && at_or_nul(text, i) != '\t') { key.push(at_or_nul(text, i)); i++; }
-        while (at_or_nul(text, i) == ' ' || at_or_nul(text, i) == '\t') { i++; }
-        if (at_or_nul(text, i) == '=') { i++; }
-        while (at_or_nul(text, i) == ' ' || at_or_nul(text, i) == '\t') { i++; }
-        while (at_or_nul(text, i) != '\0' && at_or_nul(text, i) != '\n' && at_or_nul(text, i) != '\r' && at_or_nul(text, i) != ' ') { val.push(at_or_nul(text, i)); i++; }
-        while (at_or_nul(text, i) != '\0' && at_or_nul(text, i) != '\n') { i++; }
-        if (at_or_nul(text, i) == '\n') { i++; }
+        if (text[i] == '\0') { break; }
+        char key[64] = {0};
+        char val[256] = {0};
+        size_t k = 0;
+        while (text[i] != '\0' && text[i] != '=' && text[i] != '\n'
+               && text[i] != ' ' && text[i] != '\t') {
+            if (k < 63) { key[k] = text[i]; k++; }
+            i++;
+        }
+        key[k] = '\0';
+        while (text[i] == ' ' || text[i] == '\t') { i++; }
+        if (text[i] == '=') { i++; }
+        while (text[i] == ' ' || text[i] == '\t') { i++; }
+        size_t m = 0;
+        while (text[i] != '\0' && text[i] != '\n' && text[i] != '\r' && text[i] != ' ') {
+            if (m < 255) { val[m] = text[i]; m++; }
+            i++;
+        }
+        val[m] = '\0';
+        while (text[i] != '\0' && text[i] != '\n') { i++; }
+        if (text[i] == '\n') { i++; }
 
-        if (str_eq_cstr(&_Const key, "port")) { port = parse_int(&_Const val); }
-        else if (str_eq_cstr(&_Const key, "threads")) { threads = parse_int(&_Const val); }
-        else if (str_eq_cstr(&_Const key, "document_root")) { safe_swap(&_Mut dr, &_Mut val); }
+        if (cbuf_eq(key, "port")) { c.port = parse_int_buf(val); }
+        else if (cbuf_eq(key, "threads")) { c.threads = parse_int_buf(val); }
+        else if (cbuf_eq(key, "document_root")) { cbuf_copy(c.document_root, 256, val); }
     }
-
-    Config c = { .port = port, .threads = threads, .document_root = dr };
     return c;
 }

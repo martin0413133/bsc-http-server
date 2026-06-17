@@ -1,22 +1,28 @@
 #ifndef CC_HTTP_REQUEST_HBS
 #define CC_HTTP_REQUEST_HBS
-#include "string.hbs"
-#include "vec.hbs"
+#include <stddef.h>
+#include "bishengc_safety.hbs"
 
-_Owned struct Header { _Public: String name; String value; };
+#define MAX_HEADERS 64
 
-_Owned struct Request {
-_Public:
-    String method;
-    String path;
-    String version;
-    Vec<Header> headers;
-    String body;
+struct Header { char name[64]; char value[256]; };
+
+// 仅所有权（无 _Owned struct）：普通 struct 持有 owned body，调用方用 request_free 释放。
+struct Request {
+    char method[8];
+    char path[1024];
+    char version[16];
+    struct Header headers[MAX_HEADERS];
+    size_t n_headers;
+    char *_Owned _ArrayElem body;     // 非空：始终指向有效缓冲（无体时为长度 0 的占位）
+    size_t body_len;
     _Bool ok;
 };
 
-// Parse a NUL-terminated raw request. On malformed input, ok = false.
-_Safe Request Request::parse(const char* _Nonnull raw);
-// Case-sensitive header lookup; nullptr if absent. Borrow tied to `this`.
-_Safe const String* _Borrow _Nullable Request::get_header(const Request* _Borrow this, const char* _Nonnull name);
+// 解析 NUL 结尾的原始请求；畸形时 ok=false。返回值持有 owned body，调用方须 request_free。
+_Safe struct Request request_parse(const char* _Nonnull raw);
+// 释放 Request 的 owned 资源（按值移入）。
+_Safe void request_free(struct Request r);
+// 大小写敏感首部查找；返回指向内部值缓冲的指针（借用绑定 r），缺失返回 nullptr。
+_Safe const char* _Nullable request_get_header(const struct Request* _Borrow r, const char* _Nonnull name);
 #endif

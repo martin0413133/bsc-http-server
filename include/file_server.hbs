@@ -3,8 +3,6 @@
 #include "../include/http_request.hbs"
 #include "../include/http_response.hbs"
 #include "../include/config.hbs"
-
-// Serve a static file for `req` under config->document_root. Always returns a Response.
-// Business logic; reads files via the fs adapter (no _Unsafe here).
-_Safe Response serve_static(const Config* _Borrow config, const Request* _Borrow req);
+// 为 req 在 config->document_root 下提供静态文件。总是返回 Response。
+_Safe struct Response serve_static(const struct Config* _Borrow config, const struct Request* _Borrow req);
 #endif

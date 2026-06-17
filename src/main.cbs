@@ -1,40 +1,36 @@
-// cc_httpd entry point — single translation unit aggregator.
-// Business core (no _Unsafe):
+// cc_httpd 入口 —— 单翻译单元聚合器（仅所有权版）。
 #include "str_util.cbs"
 #include "mime.cbs"
 #include "http_request.cbs"
 #include "http_response.cbs"
 #include "config.cbs"
 #include "router.cbs"
+#include "platform/net.cbs"
 #include "platform/fs.cbs"
 #include "file_server.cbs"
 #include "handler.cbs"
-// Adapters (_Unsafe inside, _Safe interface):
-#include "platform/net.cbs"
 #include "platform/log.cbs"
 #include "platform/thread_pool.cbs"
 #include "platform/runtime.cbs"
 
-#include "bishengc_safety.hbs"
-
-// Demo dynamic route. (req unused — a static greeting.)
-_Safe Response route_hello(const Request* _Borrow req __attribute__((unused))) {
-    Response resp = Response::ok_text("<h1>Hello from a cc_httpd route!</h1>", "text/html");
-    return resp;
+// 演示动态路由。
+_Safe struct Response route_hello(const struct Request* _Borrow req) {
+    (void)req;
+    return response_with_cstr(200, "OK", "text/html", "<h1>Hello from a cc_httpd route!</h1>");
 }
 
 _Safe int main(void) {
-    // Load config text via the fs adapter, then parse (business).
-    String text = String::new();
-    fs_read_file("config.ini", &_Mut text);
-    Config config = Config::parse(&_Const text);
+    // 经 fs 适配器读取配置文本，再解析
+    size_t clen = 0;
+    char *_Owned _ArrayElem _Nullable ctext = fs_read_file("config.ini", &_Mut clen);
+    struct Config config = config_default();
+    if (ctext != nullptr) {
+        // config_parse 形参为 _Borrow _ArrayElem：直接借用 owned 缓冲，免去栈拷贝。
+        config = config_parse(&_Const ctext[0]);
+        safe_free_array(ctext);
+    }
 
-    Router router = Router::new();
-    router.add("GET", "/hello", route_hello);
-
-    // Move config/router onto the heap so the runtime can share them with threads.
-    Config *_Owned cfgp = safe_malloc(config);
-    Router *_Owned rtp = safe_malloc(router);
-    int rc = runtime_serve(cfgp, rtp);
-    return rc;
+    struct Router router = router_new();
+    router_add(&_Mut router, "GET", "/hello", route_hello);
+    return server_run(&_Const config, &_Const router);
 }

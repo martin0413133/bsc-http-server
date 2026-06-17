@@ -1,11 +1,9 @@
 #ifndef CC_HANDLER_HBS
 #define CC_HANDLER_HBS
+#include "../include/http_response.hbs"
 #include "../include/config.hbs"
 #include "../include/router.hbs"
-#include "../include/http_response.hbs"
-
-// Functional core: pure request->response transformation (business, no _Unsafe, socket-free).
-// Malformed -> 400; matched route -> handler; otherwise -> static file (200/404).
-_Safe Response handle_request(const Config* _Borrow cfg, const Router* _Borrow router,
-                              const char* _Nonnull raw);
+// 纯请求处理：解析 raw、路由、生成 Response。无 socket。调用方负责 response_free。
+_Safe struct Response handle_request(const struct Config* _Borrow cfg, const struct Router* _Borrow router,
+                                     const char* _Nonnull raw);
 #endif

@@ -1,21 +1,31 @@
 #ifndef CC_HTTP_RESPONSE_HBS
 #define CC_HTTP_RESPONSE_HBS
-#include "string.hbs"
+#include <stddef.h>
+#include "bishengc_safety.hbs"
 
-_Owned struct Response {
-_Public:
+// 仅所有权（无 _Owned struct）：普通 struct 持有 owned body，调用方用 response_free 释放。
+// status_text/content_type 用定长数组而非 const char*：安全区禁止把借用结构里的指针字段
+// 拷出为独立指针，但数组字段经借用穿透访问/传参是允许的（同 Request 的 method/path）。
+struct Response {
     int status;
-    String status_text;
-    String content_type;
-    String body;
+    char status_text[32];      // 如 "OK"
+    char content_type[64];     // 如 "text/html"
+    char *_Owned _ArrayElem body;
+    size_t body_len;
 };
 
-_Safe Response Response::make(int status, const char* _Nonnull status_text);
-_Safe Response Response::ok_text(const char* _Nonnull body, const char* _Nonnull content_type);
-_Safe Response Response::ok_body(String body, const char* _Nonnull content_type); // consumes body
-_Safe Response Response::not_found(void);
-_Safe Response Response::bad_request(void);
-_Safe Response Response::server_error(void);
-// Serialize full wire bytes (status line + headers + CRLF + body).
-_Safe String Response::to_string(const Response* _Borrow this);
+// 消费一个已拥有的体缓冲
+_Safe struct Response response_with_owned(int status, const char* _Nonnull status_text,
+                                          const char* _Nonnull content_type,
+                                          char *_Owned _ArrayElem body, size_t body_len);
+// 以 C 字符串构建体（内部复制到 owned 缓冲）
+_Safe struct Response response_with_cstr(int status, const char* _Nonnull status_text,
+                                         const char* _Nonnull content_type, const char* _Nonnull body);
+_Safe struct Response response_not_found(void);
+_Safe struct Response response_bad_request(void);
+_Safe struct Response response_server_error(void);
+// 序列化完整报文到 owned 缓冲；长度经 out_len 返回。调用方负责 safe_free_array。
+_Safe char *_Owned _ArrayElem response_serialize(const struct Response* _Borrow r, size_t* _Borrow out_len);
+// 释放 Response 的 owned 资源（按值移入）。
+_Safe void response_free(struct Response r);
 #endif

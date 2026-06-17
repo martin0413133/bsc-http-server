@@ -1,27 +1,36 @@
-#include <stdio.h>
+#include "bishengc_safety.hbs"
 #include <string.h>
+#include <stdio.h>
 #include "../src/str_util.cbs"
 #include "../src/http_response.cbs"
 
 static int fails = 0;
 #define CHECK(c,m) do{ if(!(c)){_Unsafe{printf("FAIL: %s\n",m);}fails++;} }while(0)
 
-static _Bool contains(const String* _Borrow s, const char* _Nonnull needle) {
-    char buf[4096]; str_to_cbuf(s, buf, 4096);
+// 借用读取 owned 报文（不消费所有权）：拷到栈再 strstr。
+_Safe _Bool wire_contains(const char *_Borrow _ArrayElem wire, size_t len, const char* _Nonnull needle) {
+    char buf[4096] = {0};
+    for (size_t i = 0; i < len && i < 4095; i++) { buf[i] = wire[i]; }
     _Unsafe { return strstr(buf, needle) != NULL; }
 }
 
-int main(void) {
-    Response ok = Response::ok_text("hello", "text/plain");
-    String wire = ok.to_string();
-    CHECK(contains(&_Const wire, "HTTP/1.1 200 OK\r\n"), "status line");
-    CHECK(contains(&_Const wire, "Content-Type: text/plain\r\n"), "ctype");
-    CHECK(contains(&_Const wire, "Content-Length: 5\r\n"), "clen");
-    CHECK(contains(&_Const wire, "\r\n\r\nhello"), "body sep");
+_Safe int main(void) {
+    struct Response ok = response_with_cstr(200, "OK", "text/plain", "hello");
+    size_t n1 = 0;
+    char *_Owned _ArrayElem w1 = response_serialize(&_Const ok, &_Mut n1);
+    CHECK(wire_contains(&_Const w1[0], n1, "HTTP/1.1 200 OK\r\n"), "status line");
+    CHECK(wire_contains(&_Const w1[0], n1, "Content-Type: text/plain\r\n"), "ctype");
+    CHECK(wire_contains(&_Const w1[0], n1, "Content-Length: 5\r\n"), "clen");
+    CHECK(wire_contains(&_Const w1[0], n1, "\r\n\r\nhello"), "body sep");
+    safe_free_array(w1);
+    response_free(ok);
 
-    Response nf = Response::not_found();
-    String w2 = nf.to_string();
-    CHECK(contains(&_Const w2, "HTTP/1.1 404 Not Found\r\n"), "404 line");
+    struct Response nf = response_not_found();
+    size_t n2 = 0;
+    char *_Owned _ArrayElem w2 = response_serialize(&_Const nf, &_Mut n2);
+    CHECK(wire_contains(&_Const w2[0], n2, "HTTP/1.1 404 Not Found\r\n"), "404 line");
+    safe_free_array(w2);
+    response_free(nf);
 
     if (fails) { _Unsafe{printf("%d failures\n", fails);} return 1; }
     _Unsafe{printf("test_http_response OK\n");}
